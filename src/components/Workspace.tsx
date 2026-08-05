@@ -19,7 +19,7 @@ interface WorkspaceProps {
   onApplyDerivation: (docId: string, roleId: string, shouldApply: boolean) => void;
   comments: DocComment[];
   onAddComment: (comment: Omit<DocComment, 'id' | 'createdAt'>) => void;
-  onMarkCommentsRead: (docId: string, authorId: string) => void;
+  onMarkCommentsRead: (docId: string, viewerId: string) => void;
   isDirCollapsed: boolean;
   setIsDirCollapsed: (collapsed: boolean) => void;
   setActiveApp: (app: AppIdentifier) => void;
@@ -33,11 +33,20 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
     if (activeApp === 'messages' && reviewMatch) {
       const doc = libraries.flatMap(library => library.docs).find(item => item.id === reviewMatch[1]);
       const reviewerRole = reviewMatch[2] === 'u1' ? 'backend' : undefined;
-      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={reviewerRole} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} canManageDerivations={true} comments={comments.filter(comment => comment.docId === doc.id && comment.authorId === reviewMatch[2])} onAddComment={onAddComment} activeUserId={activeUserId} reviewMode />;
+      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={reviewerRole} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id && (comment.authorId === reviewMatch[2] || comment.recipientId === reviewMatch[2]))} onAddComment={onAddComment} activeUserId={activeUserId} reviewMode />;
     }
     if (!activeItemId) {
       if (activeApp === 'docs') {
         return <DocEmptyState libraries={libraries} onAddDoc={onAddDoc} />;
+      }
+      if (activeApp === 'messages') {
+        return (
+          <div className="flex flex-1 flex-col items-center justify-center bg-white text-center">
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 text-2xl">☀️</div>
+            <h3 className="text-xl font-semibold tracking-tight text-zinc-900">元气满满地开启一天的工作吧</h3>
+            <p className="mt-2 text-sm text-zinc-500">从左侧选择一个会话，继续和团队协作。</p>
+          </div>
+        );
       }
       return (
         <div className="flex-1 flex flex-col items-center justify-center bg-white">

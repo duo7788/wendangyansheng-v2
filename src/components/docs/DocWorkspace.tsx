@@ -6,6 +6,7 @@ import { DocItem, DocLibrary, ChatItem, DocComment } from '../../types';
 type CommentAnchor = {
   citationId?: '1' | '2';
   selectedText: string;
+  sourceText: string;
   x: number;
   y: number;
 };
@@ -29,21 +30,37 @@ interface DocWorkspaceProps {
 
 export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, canManageDerivations, comments, onAddComment, activeUserId, reviewMode = false }: DocWorkspaceProps) {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
-  const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set(initialRoleId ? [initialRoleId] : []));
+  const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set<string>(initialRoleId ? [initialRoleId] : []));
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
 
   // Sidebar state
-  const [isSidebarOpen, setIsSidebarOpen] = useState(canManageDerivations && !!initialRoleId);
-  const [activeDerivativeRoles, setActiveDerivativeRoles] = useState<string[]>(initialRoleId ? [initialRoleId] : []);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDerivativeMenuOpen, setIsDerivativeMenuOpen] = useState(false);
+  const [isCommentPanelOpen, setIsCommentPanelOpen] = useState(reviewMode);
+  const [activeDerivativeRoles, setActiveDerivativeRoles] = useState<string[]>(Array.from(appliedRoleIds));
   const [activeDerivativeDocs, setActiveDerivativeDocs] = useState<string[]>([]);
   const [loadingRoles, setLoadingRoles] = useState<Record<string, boolean>>({});
-  const [viewingDerivativeRole, setViewingDerivativeRole] = useState<string | null>(reviewMode ? null : initialRoleId || null);
+  const [viewingDerivativeRole, setViewingDerivativeRole] = useState<string | null>(reviewMode && canManageDerivations ? null : initialRoleId || null);
   const [highlightedCitation, setHighlightedCitation] = useState<string | null>(null);
   const [citationPreview, setCitationPreview] = useState<'1' | '2' | null>(null);
   const [showOriginal, setShowOriginal] = useState(canManageDerivations);
   const [commentAnchor, setCommentAnchor] = useState<CommentAnchor | null>(null);
   const [isCommentComposerOpen, setIsCommentComposerOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+
+  const openCommentPanel = () => {
+    setIsSidebarOpen(false);
+    setIsCommentPanelOpen(true);
+  };
+  const openRolePanel = () => {
+    setIsCommentPanelOpen(false);
+    setIsSidebarOpen(true);
+  };
+
+  useEffect(() => {
+    setActiveDerivativeRoles(previous => Array.from(new Set([...previous, ...Array.from(appliedRoleIds)])));
+  }, [appliedRoleIds]);
 
   useEffect(() => {
     const closeCitationPreview = (event: PointerEvent) => {
@@ -105,7 +122,8 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
   };
 
   const handleGenerate = () => {
-    const rolesArray = Array.from(selectedRoleIds) as string[];
+    const rolesArray = (Array.from(selectedRoleIds) as string[]).filter(roleId => !appliedRoleIds.has(roleId));
+    if (rolesArray.length === 0) return;
     setActiveDerivativeRoles(rolesArray);
     setActiveDerivativeDocs(Array.from(selectedDocIds) as string[]);
     
@@ -154,30 +172,34 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
       <span className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-zinc-200 bg-white" />
     </span>
   ) : null;
-  const placeCommentAnchor = (selectedText: string, rect: DOMRect, citationId?: '1' | '2') => {
+  const placeCommentAnchor = (selectedText: string, rect: DOMRect, citationId?: '1' | '2', sourceText = selectedText) => {
     setCommentAnchor({
       citationId,
       selectedText: selectedText.slice(0, 180),
+      sourceText: sourceText.slice(0, 220),
       x: Math.min(Math.max(rect.left + rect.width / 2, 150), window.innerWidth - 150),
       y: Math.max(rect.top - 10, 16),
     });
     setIsCommentComposerOpen(false);
   };
 
-  const handleDerivativeSelection = () => {
-    if (canManageDerivations) return;
+  const handleSelection = (sourceText?: string) => {
+    if (activeUserId === 'u_jobs') return;
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim();
     if (!selection || !selectedText || selection.rangeCount === 0) return;
     const rect = selection.getRangeAt(0).getBoundingClientRect();
     if (rect.width === 0 && rect.height === 0) return;
-    placeCommentAnchor(selectedText, rect);
+    placeCommentAnchor(selectedText, rect, undefined, sourceText || selectedText);
   };
+
+  const handleDerivativeSelection = () => handleSelection('精确的间距比例以及让人感觉自然而非机械的运动曲线。');
 
   const handleCitationComment = (citationId: '1' | '2', event: MouseEvent<HTMLElement>) => {
     event.preventDefault();
     const selectedText = citationId === '1' ? '关键技术实现路径与架构设计' : '跨模块依赖关系及排期影响';
-    placeCommentAnchor(selectedText, event.currentTarget.getBoundingClientRect(), citationId);
+    const sourceText = citationId === '1' ? '精确的间距比例以及让人感觉自然而非机械的运动曲线。' : '跨 React 和 Figma 的组件库一致性。';
+    placeCommentAnchor(selectedText, event.currentTarget.getBoundingClientRect(), citationId, sourceText);
   };
 
   const submitComment = () => {
@@ -188,11 +210,49 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
       authorId: activeUserId,
       citationId: commentAnchor.citationId,
       selectedText: commentAnchor.selectedText,
+      sourceText: commentAnchor.sourceText,
       content: commentDraft.trim(),
     });
     setCommentDraft('');
     setIsCommentComposerOpen(false);
     setCommentAnchor(null);
+    openCommentPanel();
+  };
+  const submitReply = (comment: DocComment) => {
+    const draft = replyDrafts[comment.id]?.trim();
+    if (!draft) return;
+    onAddComment({
+      docId: doc.id,
+      roleId: comment.roleId,
+      authorId: activeUserId,
+      recipientId: comment.authorId,
+      replyToId: comment.id,
+      citationId: comment.citationId,
+      selectedText: comment.selectedText,
+      sourceText: comment.sourceText,
+      content: draft,
+    });
+    setReplyDrafts(previous => ({ ...previous, [comment.id]: '' }));
+  };
+
+  const originalHighlight = comments.find(comment => comment.authorId !== 'u_jobs' && comment.sourceText)?.sourceText;
+  const highlightOriginalPhrase = (text: string) => {
+    if (!originalHighlight || !text.includes(originalHighlight)) return text;
+    const [before, after] = text.split(originalHighlight, 2);
+    return <>{before}<mark className="rounded bg-amber-200/80 px-0.5 text-zinc-900 transition-colors">{originalHighlight}</mark>{after}</>;
+  };
+  const renderDerivativeHighlight = (text: string, citationId?: '1' | '2') => {
+    const comment = comments.find(item => item.authorId !== 'u_jobs' && (
+      (citationId && item.citationId === citationId) ||
+      Boolean(item.selectedText && (text.includes(item.selectedText) || item.selectedText.includes(text)))
+    ));
+    if (!comment) return text;
+    const selected = comment.selectedText?.trim();
+    if (selected && text.includes(selected)) {
+      const [before, after] = text.split(selected, 2);
+      return <>{before}<mark className="rounded bg-amber-200/80 px-0.5 text-zinc-900">{selected}</mark>{after}</>;
+    }
+    return <mark className="rounded bg-amber-200/80 px-0.5 text-zinc-900">{text}</mark>;
   };
   
   return (
@@ -229,20 +289,21 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
               <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" className="w-8 h-8 rounded-full border-2 border-white" alt="" />
               <img src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" className="w-8 h-8 rounded-full border-2 border-white" alt="" />
             </div>
-            {canManageDerivations && <button 
-              onClick={() => {
-                if (isSidebarOpen) return;
-                if (activeDerivativeRoles.length === 0) {
-                  setIsRoleModalOpen(true);
-                } else {
-                  setIsSidebarOpen(true);
-                }
-              }}
-              className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors mr-2"
-            >
-              <Users size={16} />
-              角色衍生
-            </button>}
+            {canManageDerivations && <div className="relative mr-2">
+              <button 
+                onClick={() => activeDerivativeRoles.length === 0 ? setIsRoleModalOpen(true) : setIsDerivativeMenuOpen(open => !open)}
+                className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                <Users size={16} />
+                角色衍生
+              </button>
+              <AnimatePresence>
+                {isDerivativeMenuOpen && <motion.div initial={{ opacity: 0, y: -6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.98 }} className="absolute right-0 top-[calc(100%+8px)] z-40 w-48 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-lg">
+                  <button onClick={() => { openRolePanel(); setIsDerivativeMenuOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-50"><Eye size={15} className="text-indigo-600" />查看已有衍生</button>
+                  <button onClick={() => { setIsRoleModalOpen(true); setIsDerivativeMenuOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-50"><Plus size={15} className="text-indigo-600" />创建新衍生</button>
+                </motion.div>}
+              </AnimatePresence>
+            </div>}
             {!canManageDerivations && initialRoleId && <button onClick={() => showOriginal ? closeOriginal() : setShowOriginal(true)} className="flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors mr-2">
               <Eye size={16} />
               {showOriginal ? '关闭原文' : '查看原文'}
@@ -272,6 +333,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 72 }}
           transition={{ duration: 0.26, ease: 'easeOut' }}
+          onMouseUp={() => !canManageDerivations && handleSelection()}
           className={`relative flex-1 min-w-0 overflow-y-auto ${viewingDerivativeRole ? 'border-r border-zinc-200' : ''} ${!canManageDerivations ? 'order-2 bg-white' : 'order-1'}`}
         >
           {!canManageDerivations && <button onClick={closeOriginal} aria-label="关闭原文" className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-700"><X size={17} /></button>}
@@ -303,10 +365,10 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                   1. 执行摘要
                 </h3>
                 
-                <p className={`outline-none transition-colors duration-500 ${highlightedCitation === '1' ? 'bg-amber-100/80 rounded px-1' : ''}`} contentEditable suppressContentEditableWarning>
-                  我们的目标是整合所有平台的设计语言系统。主要目标是减少认知负荷，同时保持企业客户所需的高端质感。新界面在很大程度上依赖于微妙的对比度、精确的间距比例以及让人感觉自然而非机械的运动曲线。
+                <p onClick={() => comments.some(comment => comment.authorId !== 'u_jobs') && openCommentPanel()} className={`outline-none transition-colors duration-500 ${highlightedCitation === '1' ? 'bg-amber-100/80 rounded px-1' : ''} ${comments.some(comment => comment.authorId !== 'u_jobs' && comment.sourceText) ? 'cursor-pointer' : ''}`} contentEditable={!reviewMode} suppressContentEditableWarning>
+                  {highlightOriginalPhrase('我们的目标是整合所有平台的设计语言系统。主要目标是减少认知负荷，同时保持企业客户所需的高端质感。新界面在很大程度上依赖于微妙的对比度、精确的间距比例以及让人感觉自然而非机械的运动曲线。')}
                 </p>
-                {comments.filter(comment => comment.citationId === '1').map(comment => <div key={comment.id} className="mt-3 ml-1 max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900"><span className="font-semibold">陈莎莎 · </span>{comment.content}</div>)}
+                {!reviewMode && comments.filter(comment => comment.citationId === '1' && comment.authorId !== 'u_jobs').map(comment => <div key={comment.id} className="mt-3 ml-1 max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900"><span className="font-semibold">陈莎莎 · </span>{comment.content}</div>)}
 
                 <div className="my-8 p-6 bg-zinc-50 rounded-2xl border border-zinc-100 flex gap-4 items-start">
                   <div className="bg-white p-3 rounded-xl shadow-sm border border-zinc-100 text-blue-600 shrink-0">
@@ -327,7 +389,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                   <li>跨 React 和 Figma 的组件库一致性。</li>
                   <li>针对所有界面颜色的 WCAG AA 无障碍标准合规性审计。</li>
                 </ul>
-                {comments.filter(comment => comment.citationId === '2').map(comment => <div key={comment.id} className="mt-3 ml-1 max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900"><span className="font-semibold">陈莎莎 · </span>{comment.content}</div>)}
+                {!reviewMode && comments.filter(comment => comment.citationId === '2' && comment.authorId !== 'u_jobs').map(comment => <div key={comment.id} className="mt-3 ml-1 max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900"><span className="font-semibold">陈莎莎 · </span>{comment.content}</div>)}
               </div>
             )}
           </div>
@@ -355,13 +417,13 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                   ，专为 <span className="font-semibold text-indigo-600">{roles.find(r => r.id === viewingDerivativeRole)?.name}</span> 视角生成的摘要和行动指南。
                 </p>
 
-                <div className="relative p-5 bg-white border border-zinc-200 rounded-xl shadow-sm">
+                <div className="relative rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
                    <h3 className="text-base font-semibold text-zinc-900 mb-3 flex items-center gap-2">
                      核心关注点提取
                    </h3>
                    <ul className="list-disc pl-5 space-y-2 text-zinc-600">
-                     <li>关键技术实现路径与架构设计 <span className="relative inline-block"><sup data-citation-trigger className="cursor-pointer text-indigo-500 hover:text-indigo-700" onClick={() => openCitation('1')} onContextMenu={event => handleCitationComment('1', event)}>[1]</sup>{citationPreview === '1' && <span className="pointer-events-none absolute bottom-[calc(100%+14px)] left-1/2 z-30 block w-[390px] -translate-x-1/2"><span className="pointer-events-auto block">{renderCitationCard('1')}</span></span>}</span></li>
-                     <li>跨模块依赖关系及排期影响 <span className="relative inline-block"><sup data-citation-trigger className="cursor-pointer text-indigo-500 hover:text-indigo-700" onClick={() => openCitation('2')} onContextMenu={event => handleCitationComment('2', event)}>[2]</sup>{citationPreview === '2' && <span className="pointer-events-none absolute bottom-[calc(100%+14px)] left-1/2 z-30 block w-[390px] -translate-x-1/2"><span className="pointer-events-auto block">{renderCitationCard('2')}</span></span>}</span></li>
+                     <li onClick={() => comments.some(comment => comment.citationId === '1' && comment.authorId !== 'u_jobs') && openCommentPanel()} className={comments.some(comment => comment.citationId === '1' && comment.authorId !== 'u_jobs') ? 'cursor-pointer' : ''}>{renderDerivativeHighlight('关键技术实现路径与架构设计', '1')} <span className="relative inline-block"><sup data-citation-trigger className="cursor-pointer text-indigo-500 hover:text-indigo-700" onClick={event => { event.stopPropagation(); openCitation('1'); }} onContextMenu={event => handleCitationComment('1', event)}>[1]</sup>{citationPreview === '1' && <span className="pointer-events-none absolute bottom-[calc(100%+14px)] left-1/2 z-30 block w-[390px] -translate-x-1/2"><span className="pointer-events-auto block">{renderCitationCard('1')}</span></span>}</span></li>
+                     <li onClick={() => comments.some(comment => comment.citationId === '2' && comment.authorId !== 'u_jobs') && openCommentPanel()} className={comments.some(comment => comment.citationId === '2' && comment.authorId !== 'u_jobs') ? 'cursor-pointer' : ''}>{renderDerivativeHighlight('跨模块依赖关系及排期影响', '2')} <span className="relative inline-block"><sup data-citation-trigger className="cursor-pointer text-indigo-500 hover:text-indigo-700" onClick={event => { event.stopPropagation(); openCitation('2'); }} onContextMenu={event => handleCitationComment('2', event)}>[2]</sup>{citationPreview === '2' && <span className="pointer-events-none absolute bottom-[calc(100%+14px)] left-1/2 z-30 block w-[390px] -translate-x-1/2"><span className="pointer-events-auto block">{renderCitationCard('2')}</span></span>}</span></li>
                      <li>从关联文档中提取的风险预警</li>
                    </ul>
                 </div>
@@ -425,7 +487,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
 
         {/* Derivative Sidebar */}
         <AnimatePresence initial={false}>
-        {isSidebarOpen && (
+        {(isSidebarOpen || isCommentPanelOpen) && (
           <motion.aside
             initial={{ width: 0, x: 320, opacity: 0 }}
             animate={{ width: 320, x: 0, opacity: 1 }}
@@ -434,15 +496,27 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
             className="order-3 ml-auto shrink-0 overflow-hidden border-l border-zinc-200 bg-white flex flex-col z-10 shadow-[-4px_0_12px_rgba(0,0,0,0.02)]"
           >
             <div className="h-[72px] border-b border-zinc-100 flex items-center px-5 justify-between shrink-0">
-              <span className="font-semibold text-sm text-zinc-900">角色衍生</span>
+              <span className="font-semibold text-sm text-zinc-900">{isCommentPanelOpen ? '文档评论' : '角色衍生'}</span>
               <button 
-                onClick={() => setIsSidebarOpen(false)}
+                onClick={() => isCommentPanelOpen ? setIsCommentPanelOpen(false) : setIsSidebarOpen(false)}
                 className="text-zinc-400 hover:text-zinc-600 p-1.5 rounded-md hover:bg-zinc-100 transition-colors"
               >
                 <X size={16} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto">
+              {isCommentPanelOpen ? <div className="p-4 space-y-3">
+                {comments.filter(comment => comment.authorId !== 'u_jobs').map(comment => {
+                  const reply = comments.find(item => item.replyToId === comment.id);
+                  return <div key={comment.id} className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-3.5">
+                    <div className="flex items-center gap-2 text-xs"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 font-semibold text-indigo-700">陈</span><span className="font-semibold text-zinc-900">陈莎莎（后端）</span><span className="text-zinc-400">{comment.createdAt}</span></div>
+                    <p className="mt-3 text-sm leading-relaxed text-zinc-700">{comment.content}</p>
+                    {comment.sourceText && <p className="mt-2 border-l-2 border-amber-300 pl-2 text-xs leading-relaxed text-zinc-500">定位原文：{comment.sourceText}</p>}
+                    {reply ? <div className="mt-3 border-t border-zinc-200/80 pt-3"><p className="text-xs font-semibold text-indigo-700">乔布斯的回复</p><p className="mt-1 text-sm leading-relaxed text-zinc-700">{reply.content}</p></div> : activeUserId === 'u_jobs' ? <div className="mt-3 border-t border-zinc-200/80 pt-3"><textarea value={replyDrafts[comment.id] || ''} onChange={event => setReplyDrafts(previous => ({ ...previous, [comment.id]: event.target.value }))} placeholder="回复陈莎莎…" className="min-h-16 w-full resize-none rounded-lg border border-zinc-200 bg-white p-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /><div className="mt-2 flex justify-end"><button onClick={() => submitReply(comment)} disabled={!replyDrafts[comment.id]?.trim()} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">发送回复</button></div></div> : null}
+                  </div>;
+                })}
+                {comments.filter(comment => comment.authorId !== 'u_jobs').length === 0 && <div className="py-12 text-center text-sm text-zinc-400">暂时没有文档评论</div>}
+              </div> : <>
               {activeDerivativeRoles.map(roleId => {
                 const role = roles.find(r => r.id === roleId);
                 const isLoading = loadingRoles[roleId];
@@ -518,8 +592,9 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                   </div>
                 );
               })}
+              </>}
             </div>
-            {canManageDerivations && <div className="p-4 border-t border-zinc-100">
+            {!isCommentPanelOpen && canManageDerivations && <div className="p-4 border-t border-zinc-100">
               <button 
                 onClick={() => setIsRoleModalOpen(true)}
                 className="w-full py-2 flex items-center justify-center gap-2 text-sm font-medium text-zinc-600 hover:text-zinc-900 bg-zinc-50 hover:bg-zinc-100 rounded-lg transition-colors"
@@ -565,19 +640,23 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   {roles.map(role => {
-                    const isSelected = selectedRoleIds.has(role.id);
+                    const isApplied = appliedRoleIds.has(role.id);
+                    const isSelected = isApplied || selectedRoleIds.has(role.id);
                     return (
                       <button
                         key={role.id}
-                        onClick={() => toggleRoleSelection(role.id)}
+                        disabled={isApplied}
+                        onClick={() => !isApplied && toggleRoleSelection(role.id)}
                         className={`flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-medium transition-colors ${
-                          isSelected 
+                          isApplied
+                            ? 'cursor-not-allowed border-emerald-200 bg-emerald-50 text-emerald-700'
+                            : isSelected 
                             ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
                             : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'
                         }`}
                       >
                         {role.name}
-                        {isSelected && <Check size={16} />}
+                        {isApplied ? <span className="text-xs font-semibold">已启用</span> : isSelected && <Check size={16} />}
                       </button>
                     );
                   })}
@@ -643,7 +722,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                 </button>
                 <button 
                   onClick={handleGenerate}
-                  disabled={selectedRoleIds.size === 0}
+                  disabled={(Array.from(selectedRoleIds) as string[]).filter(roleId => !appliedRoleIds.has(roleId)).length === 0}
                   className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
                 >
                   生成衍生

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Directory } from './components/Directory';
 import { Workspace } from './components/Workspace';
@@ -86,25 +86,30 @@ export default function App() {
 
   const handleAddComment = (comment: Omit<DocComment, 'id' | 'createdAt'>) => {
     const createdAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const isOwnerReply = comment.authorId === 'u_jobs' && Boolean(comment.recipientId);
     setComments(prev => [...prev, {
       ...comment,
       id: `comment_${Date.now()}`,
       createdAt,
-      readByOwner: false,
+      readByOwner: isOwnerReply,
+      readByRecipient: isOwnerReply ? false : undefined,
     }]);
     const docTitle = libraries.flatMap(library => library.docs).find(doc => doc.id === comment.docId)?.title || '文档';
-    setChats(prev => prev.map(chat => chat.user.id === comment.authorId ? {
+    const counterpartId = isOwnerReply ? comment.recipientId : comment.authorId;
+    setChats(prev => prev.map(chat => chat.user.id === counterpartId ? {
       ...chat,
-      lastMessage: `[文档评论] ${docTitle}`,
+      lastMessage: `${isOwnerReply ? '[回复评论]' : '[文档评论]'} ${docTitle}`,
       timestamp: createdAt,
     } : chat));
   };
 
-  const handleMarkCommentsRead = (docId: string, authorId: string) => {
-    setComments(prev => prev.map(comment => comment.docId === docId && comment.authorId === authorId
-      ? { ...comment, readByOwner: true }
-      : comment
-    ));
+  const handleMarkCommentsRead = (docId: string, viewerId: string) => {
+    setComments(prev => prev.map(comment => {
+      if (comment.docId !== docId) return comment;
+      if (viewerId === 'u_jobs' && comment.authorId !== 'u_jobs') return { ...comment, readByOwner: true };
+      if (comment.authorId === 'u_jobs' && comment.recipientId === viewerId) return { ...comment, readByRecipient: true };
+      return comment;
+    }));
   };
 
   const currentUserRole = USER_ROLE_BY_ID[activeUserId];
@@ -123,23 +128,26 @@ export default function App() {
     setActiveItemId(doc.id);
   };
 
-  // When changing apps, automatically select the first item if available
-  useEffect(() => {
+  const handleSelectApp = (app: AppIdentifier) => {
+    setActiveApp(app);
+    setActiveItemId(null);
     setIsDirCollapsed(false);
-    if (activeApp === 'messages') {
-      setActiveItemId(chats[0]?.id || null);
-    } else if (activeApp === 'docs' && activeItemId && !libraries.some(library => library.docs.some(doc => doc.id === activeItemId.split('|')[0]))) {
-      setActiveItemId(null);
-    }
-  }, [activeApp]);
+  };
+
+  const handleSwitchUser = (userId: string) => {
+    setActiveUserId(userId);
+    setActiveApp('messages');
+    setActiveItemId(null);
+    setIsDirCollapsed(false);
+  };
 
   return (
     <div className="h-screen w-full flex bg-[#F7F8FA] overflow-hidden text-zinc-900 font-sans selection:bg-blue-100 selection:text-blue-900 antialiased">
       <Sidebar 
         activeApp={activeApp} 
-        setActiveApp={setActiveApp} 
+        setActiveApp={handleSelectApp} 
         activeUserId={activeUserId}
-        setActiveUserId={setActiveUserId}
+        setActiveUserId={handleSwitchUser}
       />
       <Directory 
         activeApp={activeApp} 
@@ -150,6 +158,7 @@ export default function App() {
         activeUserId={activeUserId}
         comments={comments}
         onMarkCommentsRead={handleMarkCommentsRead}
+        appliedDerivations={appliedDerivations}
         isCollapsed={isDirCollapsed}
         setIsCollapsed={setIsDirCollapsed}
       />

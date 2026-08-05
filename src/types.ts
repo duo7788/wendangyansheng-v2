@@ -48,7 +48,12 @@ export interface DocComment {
   authorId: string;
   citationId?: '1' | '2';
   selectedText?: string;
+  /** The matching original-document expression, used to restore the anchor in review mode. */
+  sourceText?: string;
   content: string;
   createdAt: string;
   readByOwner?: boolean;
+  recipientId?: string;
+  replyToId?: string;
+  readByRecipient?: boolean;
 }

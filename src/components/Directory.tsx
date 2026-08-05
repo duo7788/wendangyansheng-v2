@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Folder, File, FileSpreadsheet, Presentation, ChevronRight, ChevronDown, PanelLeftClose, MessageSquare } from 'lucide-react';
+import { Search, Folder, File, FileSpreadsheet, Presentation, ChevronRight, ChevronDown, PanelLeftClose, MessageSquare, Sparkles } from 'lucide-react';
 import { AppIdentifier, DocLibrary, ChatItem, DocComment } from '../types';
 import { USERS } from '../App';
 
@@ -12,17 +12,20 @@ interface DirectoryProps {
   chats?: ChatItem[];
   activeUserId: string;
   comments: DocComment[];
-  onMarkCommentsRead: (docId: string, authorId: string) => void;
+  onMarkCommentsRead: (docId: string, viewerId: string) => void;
+  appliedDerivations: Record<string, Set<string>>;
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
 }
 
-export function Directory({ activeApp, activeItemId, setActiveItemId, libraries = [], chats = [], activeUserId, comments, onMarkCommentsRead, isCollapsed, setIsCollapsed }: DirectoryProps) {
+export function Directory({ activeApp, activeItemId, setActiveItemId, libraries = [], chats = [], activeUserId, comments, onMarkCommentsRead, appliedDerivations, isCollapsed, setIsCollapsed }: DirectoryProps) {
   const [expandedLibs, setExpandedLibs] = useState<Record<string, boolean>>({
     'lib1': true,
     'lib2': true,
     'lib3': true,
   });
+  const [expandedDerivations, setExpandedDerivations] = useState<Record<string, boolean>>({});
+  const roleNames: Record<string, string> = { backend: '后端工程师', frontend: '前端工程师', qa: '测试工程师', ui: 'UI 设计师' };
 
   const toggleLib = (libId: string) => {
     setExpandedLibs(prev => ({ ...prev, [libId]: !prev[libId] }));
@@ -89,11 +92,16 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
             >
             {activeApp === 'messages' && chats.map((chat) => (
               (() => {
-                const displayUser = chat.user.id === activeUserId
+                const isOwner = activeUserId === 'u_jobs';
+                const displayUser = !isOwner && chat.user.id === activeUserId
                   ? USERS.find(user => user.id === 'u_jobs') || chat.user
                   : chat.user;
-                const chatComments = activeUserId === 'u_jobs' ? comments.filter(comment => comment.authorId === chat.user.id) : [];
-                const commentGroups = Array.from(new Map(chatComments.map(comment => [comment.docId, comment])).values());
+                const unreadEvents = isOwner
+                  ? comments.filter(comment => comment.authorId === chat.user.id && !comment.readByOwner)
+                  : chat.user.id === activeUserId
+                    ? comments.filter(comment => comment.authorId === 'u_jobs' && comment.recipientId === activeUserId && !comment.readByRecipient)
+                    : [];
+                const commentGroups = Array.from(new Map(unreadEvents.map(comment => [comment.docId, comment])).values());
                 return <div key={chat.id}>
                 <button
                 key={chat.id}
@@ -125,9 +133,10 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
               </button>
               {commentGroups.map(comment => {
                 const doc = libraries.flatMap(library => library.docs).find(item => item.id === comment.docId);
-                const unreadCount = chatComments.filter(item => item.docId === comment.docId && !item.readByOwner).length;
-                return <button key={`review-${comment.docId}`} onClick={() => { onMarkCommentsRead(comment.docId, chat.user.id); setActiveItemId(`review:${comment.docId}:${chat.user.id}`); }} className={`relative ml-8 mt-1 w-[calc(100%-2rem)] flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-xs shadow-sm transition-all ${activeItemId === `review:${comment.docId}:${chat.user.id}` ? 'border-indigo-200 bg-indigo-50 text-indigo-800' : 'border-zinc-200 bg-white text-zinc-600 hover:border-indigo-200 hover:bg-indigo-50/40'}`}>
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600"><MessageSquare size={14} /></span>
+                const unreadCount = unreadEvents.filter(item => item.docId === comment.docId).length;
+                const reviewerId = isOwner ? chat.user.id : activeUserId;
+                return <button key={`review-${comment.docId}`} onClick={() => { onMarkCommentsRead(comment.docId, activeUserId); setActiveItemId(`review:${comment.docId}:${reviewerId}`); }} className={`relative ml-8 mt-1 w-[calc(100%-2rem)] flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-all ${activeItemId === `review:${comment.docId}:${reviewerId}` ? 'bg-indigo-50 text-indigo-800' : 'text-zinc-600 hover:bg-zinc-100/80'}`}>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-indigo-50 text-indigo-600"><MessageSquare size={14} /></span>
                   <span className="truncate flex-1 font-medium">{doc?.title || '文档评论'}</span>
                   {unreadCount > 0 && <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[#F7F8FA] bg-rose-500 px-1 text-[10px] font-bold text-white">{unreadCount}</span>}
                 </button>;
@@ -155,8 +164,8 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
                       className="overflow-hidden flex flex-col gap-0.5 mt-1"
                     >
                       {lib.docs.map((doc) => (
+                        <div key={doc.id}>
                         <button
-                          key={doc.id}
                           onClick={() => setActiveItemId(doc.id)}
                           className={`w-full flex items-center gap-3 p-2.5 pl-8 rounded-xl text-left transition-all ${
                             actualItemId === doc.id
@@ -172,6 +181,21 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
                             <p className="text-xs text-zinc-500 truncate mt-0.5">修改于 {doc.updatedAt}</p>
                           </div>
                         </button>
+                        {activeUserId === 'u_jobs' && (appliedDerivations[doc.id]?.size || 0) > 0 && (
+                          <div className="ml-8 mt-0.5">
+                            <button onClick={() => setExpandedDerivations(prev => ({ ...prev, [doc.id]: !prev[doc.id] }))} className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-zinc-500 hover:text-indigo-700">
+                              {expandedDerivations[doc.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                              <Sparkles size={12} className="text-indigo-500" />
+                              {appliedDerivations[doc.id].size} 个衍生文档
+                            </button>
+                            <AnimatePresence>
+                              {expandedDerivations[doc.id] && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-4">
+                                {Array.from(appliedDerivations[doc.id]).map(roleId => <button key={roleId} onClick={() => setActiveItemId(`${doc.id}|${roleId}`)} className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs ${activeItemId === `${doc.id}|${roleId}` ? 'bg-indigo-50 text-indigo-700' : 'text-zinc-500 hover:bg-zinc-100'}`}><Sparkles size={12} /><span className="truncate">{roleNames[roleId] || '自定义角色'} · 衍生文档</span></button>)}
+                              </motion.div>}
+                            </AnimatePresence>
+                          </div>
+                        )}
+                        </div>
                       ))}
                     </motion.div>
                   )}

@@ -45,40 +45,60 @@ const toAiText = (content: string, maxLength = 30000) => {
   return plainText.replace(/\s+/g, ' ').trim().slice(0, maxLength);
 };
 
-const renderInlineMarkdown = (text: string, keyPrefix: string): ReactNode[] => {
-  const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+type InlineCitation = { id: number; quote: string };
+
+const citationContext = (source: string, quote: string) => {
+  const normalizedSource = source.replace(/\s+/g, ' ').trim();
+  const normalizedQuote = quote.replace(/\s+/g, ' ').trim();
+  const index = normalizedSource.indexOf(normalizedQuote);
+  if (index < 0) return { before: '', focus: normalizedQuote, after: '' };
+  return {
+    before: normalizedSource.slice(Math.max(0, index - 54), index),
+    focus: normalizedQuote,
+    after: normalizedSource.slice(index + normalizedQuote.length, index + normalizedQuote.length + 54),
+  };
+};
+
+const renderInlineMarkdown = (text: string, keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = ''): ReactNode[] => {
+  const tokens = text.split(/(\[\[cite:[\s\S]*?\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
   return tokens.map((token, index) => {
     const key = `${keyPrefix}-${index}`;
+    if (token.startsWith('[[cite:') && token.endsWith(']]')) {
+      const citation = { id: Number(keyPrefix.replace(/\D/g, '')) + 1, quote: token.slice(7, -2).trim() };
+      const context = citationContext(sourceText, citation.quote);
+      return <span key={key} className="relative ml-1 inline-block align-baseline"><button type="button" data-citation-trigger onClick={event => { event.stopPropagation(); onCitationClick?.(citation); }} className="text-xs font-semibold text-indigo-600 hover:text-indigo-800">[{citation.id}]</button>{activeCitationId === citation.id && <span data-citation-popover className="absolute bottom-[calc(100%+12px)] left-1/2 z-30 block w-[360px] -translate-x-1/2 rounded-2xl border border-zinc-200 bg-white p-4 text-left shadow-xl"><span className="block text-xs font-medium text-zinc-400">原文定位 · [{citation.id}]</span><span className="mt-2 block text-xs leading-relaxed text-zinc-300">{context.before}</span><span className="block text-sm font-semibold leading-relaxed text-zinc-900">{context.focus}</span><span className="block text-xs leading-relaxed text-zinc-300">{context.after}</span><button type="button" onClick={onRevealOriginal} className="mt-3 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">查看原文</button><span className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-zinc-200 bg-white" /></span>}</span>;
+    }
     if (token.startsWith('**') && token.endsWith('**')) return <strong key={key} className="font-semibold text-zinc-900">{token.slice(2, -2)}</strong>;
     if (token.startsWith('`') && token.endsWith('`')) return <code key={key} className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[0.9em] text-zinc-800">{token.slice(1, -1)}</code>;
     return <span key={key}>{token}</span>;
   });
 };
 
-const renderMarkdownLines = (lines: string[], keyPrefix: string) => lines.map((line, index) => {
+const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '') => lines.map((line, index) => {
   const key = `${keyPrefix}-${index}`;
   if (!line.trim()) return <div key={key} className="h-3" />;
   const heading = line.match(/^(#{1,3})\s+(.+)$/);
   if (heading) {
     const level = heading[1].length;
     const className = level === 1 ? 'mt-2 text-2xl font-bold tracking-tight text-zinc-900' : level === 2 ? 'mt-9 text-xl font-semibold text-zinc-900' : 'mt-6 text-base font-semibold text-zinc-900';
-    return <h2 key={key} className={className}>{renderInlineMarkdown(heading[2], key)}</h2>;
+    return <h2 key={key} className={className}>{renderInlineMarkdown(heading[2], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</h2>;
   }
   const task = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
-  if (task) return <div key={key} className="flex gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm"><span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${task[1].toLowerCase() === 'x' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-zinc-300'}`}>{task[1].toLowerCase() === 'x' ? <Check size={12} /> : null}</span><span>{renderInlineMarkdown(task[2], key)}</span></div>;
+  if (task) return <div key={key} className="flex gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm"><span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${task[1].toLowerCase() === 'x' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-zinc-300'}`}>{task[1].toLowerCase() === 'x' ? <Check size={12} /> : null}</span><span>{renderInlineMarkdown(task[2], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</span></div>;
   const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
-  if (ordered) return <div key={key} className="flex gap-3 pl-1"><span className="font-medium text-zinc-400">{line.match(/^\s*(\d+)/)?.[1]}.</span><span>{renderInlineMarkdown(ordered[1], key)}</span></div>;
+  if (ordered) return <div key={key} className="flex gap-3 pl-1"><span className="font-medium text-zinc-400">{line.match(/^\s*(\d+)/)?.[1]}.</span><span>{renderInlineMarkdown(ordered[1], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</span></div>;
   const bullet = line.match(/^\s*[-*]\s+(.+)$/);
-  if (bullet) return <div key={key} className="flex gap-3 pl-1"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" /><span>{renderInlineMarkdown(bullet[1], key)}</span></div>;
-  return <p key={key}>{renderInlineMarkdown(line, key)}</p>;
+  if (bullet) return <div key={key} className="flex gap-3 pl-1"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" /><span>{renderInlineMarkdown(bullet[1], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</span></div>;
+  return <p key={key}>{renderInlineMarkdown(line, key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</p>;
 });
 
-const RenderedDerivation = ({ content }: { content: string }) => {
+const RenderedDerivation = ({ content, sourceText, activeCitation, onCitationClick, onRevealOriginal }: { content: string; sourceText: string; activeCitation: InlineCitation | null; onCitationClick: (citation: InlineCitation) => void; onRevealOriginal: () => void }) => {
   const lines = content.replace(/\r\n/g, '\n').split('\n');
-  const evidenceIndex = lines.findIndex(line => /^#{1,3}\s*原文依据\s*$/.test(line.trim()));
-  const mainLines = evidenceIndex === -1 ? lines : lines.slice(0, evidenceIndex);
-  const evidenceLines = evidenceIndex === -1 ? [] : lines.slice(evidenceIndex + 1);
-  return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(mainLines, 'main')}{evidenceLines.length > 0 && <details className="mt-10 rounded-xl border border-zinc-200 bg-white px-5 py-4 text-zinc-600 shadow-sm"><summary className="cursor-pointer select-none text-sm font-semibold text-zinc-700 marker:text-indigo-500">查看原文依据</summary><div className="mt-4 border-t border-zinc-100 pt-3">{renderMarkdownLines(evidenceLines, 'evidence')}</div></details>}</article>;
+  // Old saved generations may still include the former appendix. Hide it so
+  // they do not contradict the new inline-citation experience.
+  const legacyEvidenceIndex = lines.findIndex(line => /^#{1,3}\s*原文依据\s*$/.test(line.trim()));
+  const visibleLines = legacyEvidenceIndex === -1 ? lines : lines.slice(0, legacyEvidenceIndex);
+  return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(visibleLines, 'line', onCitationClick, activeCitation?.id, onRevealOriginal, sourceText)}</article>;
 };
 
 interface DocWorkspaceProps {
@@ -117,6 +137,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [viewingDerivativeRole, setViewingDerivativeRole] = useState<string | null>(reviewMode && canManageDerivations ? null : initialRoleId || null);
   const [highlightedCitation, setHighlightedCitation] = useState<string | null>(null);
   const [citationPreview, setCitationPreview] = useState<'1' | '2' | null>(null);
+  const [inlineCitationPreview, setInlineCitationPreview] = useState<InlineCitation | null>(null);
   // Recipients with an applied role open their dedicated view. Everyone else
   // opens the original document rather than an empty workspace.
   const [showOriginal, setShowOriginal] = useState(canManageDerivations || !initialRoleId);
@@ -129,6 +150,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [bodyTitle, setBodyTitle] = useState('');
   const [bodyText, setBodyText] = useState('');
   const citationHighlightTimer = useRef<number | null>(null);
+  const originalDocumentRef = useRef<HTMLDivElement>(null);
   const [mentionMenu, setMentionMenu] = useState<MentionMenu | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
 
@@ -174,6 +196,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       const target = event.target;
       if (target instanceof Element && target.closest('[data-citation-popover], [data-citation-trigger]')) return;
       setCitationPreview(null);
+      setInlineCitationPreview(null);
       setHighlightedCitation(null);
     };
     document.addEventListener('pointerdown', closeCitationPreview);
@@ -413,6 +436,50 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       <span className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-zinc-200 bg-white" />
     </span>
   ) : null;
+  // Same yellow, one-second source emphasis as the mock citation interaction,
+  // but the target sentence now comes from Kimi's inline [[cite:...]] marker.
+  const flashInlineOriginal = (quote: string) => {
+    const root = originalDocumentRef.current;
+    if (!root || !quote.trim()) return;
+    root.querySelectorAll('[data-inline-source-highlight]').forEach(mark => mark.replaceWith(document.createTextNode(mark.textContent || '')));
+    const normalizedQuote = quote.replace(/\s+/g, ' ').trim();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node: Text | null = walker.nextNode() as Text | null;
+    while (node) {
+      const normalizedNode = node.textContent?.replace(/\s+/g, ' ') || '';
+      const start = normalizedNode.indexOf(normalizedQuote);
+      if (start >= 0) {
+        const range = document.createRange();
+        range.setStart(node, start);
+        range.setEnd(node, start + normalizedQuote.length);
+        const mark = document.createElement('mark');
+        mark.dataset.inlineSourceHighlight = 'true';
+        mark.className = 'rounded bg-amber-200/80 px-0.5 text-zinc-900 transition-colors';
+        range.surroundContents(mark);
+        mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
+        citationHighlightTimer.current = window.setTimeout(() => {
+          mark.replaceWith(document.createTextNode(mark.textContent || ''));
+          citationHighlightTimer.current = null;
+        }, 1000);
+        return;
+      }
+      node = walker.nextNode() as Text | null;
+    }
+  };
+  const openInlineCitation = (citation: InlineCitation) => {
+    if (showOriginal) {
+      flashInlineOriginal(citation.quote);
+      return;
+    }
+    setInlineCitationPreview(citation);
+  };
+  const revealInlineOriginal = () => {
+    const citation = inlineCitationPreview;
+    setInlineCitationPreview(null);
+    setShowOriginal(true);
+    if (citation) window.setTimeout(() => flashInlineOriginal(citation.quote), 280);
+  };
   const placeCommentAnchor = (selectedText: string, rect: DOMRect, citationId?: '1' | '2', sourceText = selectedText) => {
     setCommentAnchor({
       citationId,
@@ -576,7 +643,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           className={`relative flex-1 min-w-0 overflow-y-auto ${viewingDerivativeRole ? 'border-r border-zinc-200' : ''} ${!canManageDerivations ? 'order-2 bg-white' : 'order-1'}`}
         >
           {!canManageDerivations && <button onClick={closeOriginal} aria-label="关闭原文" className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-700"><X size={17} /></button>}
-          <div onKeyUp={updateMentionMenu} onKeyDown={handleEditorKeyDown} className="max-w-4xl mx-auto px-12 py-16">
+          <div ref={originalDocumentRef} onKeyUp={updateMentionMenu} onKeyDown={handleEditorKeyDown} className="max-w-4xl mx-auto px-12 py-16">
             <div className="mb-6 flex items-center gap-3">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-100 text-xs font-medium text-zinc-600">
                 {doc.type === 'document' ? '文档' : doc.type === 'spreadsheet' ? '表格' : doc.type === 'presentation' ? '演示文稿' : '文件夹'}
@@ -683,7 +750,13 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               </h1>
               
               {generatedDerivations[viewingDerivativeRole] ? (
-                <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} />
+                <RenderedDerivation
+                  content={generatedDerivations[viewingDerivativeRole].content}
+                  sourceText={toAiText(doc.content || getSourceDocumentContent())}
+                  activeCitation={inlineCitationPreview}
+                  onCitationClick={openInlineCitation}
+                  onRevealOriginal={revealInlineOriginal}
+                />
               ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed">
                 <p>

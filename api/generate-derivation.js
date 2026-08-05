@@ -18,14 +18,17 @@ function json(res, status, body) {
 async function saveDerivation(record) {
   const url = required(process.env.SUPABASE_URL, 'SUPABASE_URL');
   const key = required(process.env.SUPABASE_SERVICE_ROLE_KEY, 'SUPABASE_SERVICE_ROLE_KEY');
+  // New Supabase secret keys (`sb_secret_...`) are API keys, not JWTs.
+  // Legacy service_role keys are JWTs and still need the Bearer header.
+  const headers = {
+    apikey: key,
+    'Content-Type': 'application/json',
+    Prefer: 'resolution=merge-duplicates,return=representation',
+  };
+  if (key.startsWith('eyJ')) headers.Authorization = `Bearer ${key}`;
   const response = await fetch(`${url}/rest/v1/document_derivations?on_conflict=source_document_id,role_id`, {
     method: 'POST',
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-      Prefer: 'resolution=merge-duplicates,return=representation',
-    },
+    headers,
     body: JSON.stringify(record),
   });
   if (!response.ok) throw new Error(`保存到 Supabase 失败：${await response.text()}`);

@@ -1,13 +1,13 @@
 @import "tailwindcss";
 
 .imported-doc {
-  @apply space-y-6 text-base text-zinc-700 leading-relaxed font-normal;
+  @apply space-y-6 text-sm text-zinc-700 leading-relaxed font-normal;
 }
 .imported-doc p {
   @apply outline-none;
 }
 .imported-doc h1, .imported-doc h2, .imported-doc h3 {
-  @apply text-xl font-semibold text-zinc-900 mt-12 mb-4 outline-none;
+  @apply text-lg font-semibold text-zinc-900 mt-10 mb-4 outline-none;
 }
 .imported-doc ul {
   @apply list-disc pl-5 space-y-2 outline-none;
@@ -17,4 +17,7 @@
 }
 .imported-doc strong, .imported-doc b {
   @apply font-semibold text-zinc-900;
+}
+.imported-doc img {
+  @apply my-6 h-auto max-w-full rounded-xl border border-zinc-100;
 }

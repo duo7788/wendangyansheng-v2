@@ -28,6 +28,7 @@ export interface ChatItem {
   timestamp: string;
   unreadCount: number;
   messages?: Message[];
+  participantIds?: string[];
 }
 
 export interface DocItem {
@@ -37,6 +38,8 @@ export interface DocItem {
   author: string;
   type: 'document' | 'spreadsheet' | 'presentation' | 'folder';
   content?: string;
+  isUntitled?: boolean;
+  isBlank?: boolean;
 }
 
 export interface DocLibrary {

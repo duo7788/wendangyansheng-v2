@@ -11,6 +11,7 @@ interface WorkspaceProps {
   libraries: DocLibrary[];
   chats: ChatItem[];
   onAddDoc: (libId: string, doc: DocItem) => void;
+  onUpdateDoc: (docId: string, patch: Partial<DocItem>) => void;
   onShareDoc: (chatId: string, doc: DocItem) => void;
   onSendMessage: (chatId: string, content: string) => void;
   onMarkChatRead: (chatId: string, viewerId: string) => void;
@@ -27,7 +28,7 @@ interface WorkspaceProps {
   setActiveItemId: (id: string | null) => void;
 }
 
-export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, comments, onAddComment, onMarkCommentsRead, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
+export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onUpdateDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, comments, onAddComment, onMarkCommentsRead, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
   
   const renderContent = () => {
     const reviewMatch = activeItemId?.match(/^review:([^:]+):([^:]+)$/);
@@ -69,7 +70,8 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
       const allDocs = libraries.flatMap(lib => lib.docs);
       const [actualDocId, roleId] = activeItemId.split('|');
       const doc = allDocs.find(d => d.id === actualDocId);
-      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={initialDerivativeRole || roleId} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} activeUserId={activeUserId} />;
+      const library = libraries.find(item => item.docs.some(item => item.id === actualDocId));
+      if (doc) return <DocWorkspace doc={doc} libraryName={library?.name} onUpdateDoc={onUpdateDoc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={initialDerivativeRole || roleId} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} activeUserId={activeUserId} />;
     }
 
     return (

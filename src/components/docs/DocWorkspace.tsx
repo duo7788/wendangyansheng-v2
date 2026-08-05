@@ -2,6 +2,7 @@ import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, File
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DocItem, DocLibrary, ChatItem, DocComment } from '../../types';
+import { formatPlainTextAsDocument } from './DocEmptyState';
 
 type CommentAnchor = {
   citationId?: '1' | '2';
@@ -39,6 +40,8 @@ const getSourceDocumentContent = () => `本文档作为项目的唯一事实来�
 
 interface DocWorkspaceProps {
   doc: DocItem;
+  libraryName?: string;
+  onUpdateDoc?: (docId: string, patch: Partial<DocItem>) => void;
   libraries: DocLibrary[];
   chats: ChatItem[];
   onShareDoc: (chatId: string, doc: DocItem, roleId?: string | null) => void;
@@ -54,7 +57,7 @@ interface DocWorkspaceProps {
   reviewMode?: boolean;
 }
 
-export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, canManageDerivations, comments, onAddComment, activeUserId, reviewMode = false }: DocWorkspaceProps) {
+export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, canManageDerivations, comments, onAddComment, activeUserId, reviewMode = false }: DocWorkspaceProps) {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set<string>(initialRoleId ? [initialRoleId] : []));
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
@@ -78,6 +81,10 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
   const [isCommentComposerOpen, setIsCommentComposerOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(doc.isUntitled ? '' : doc.title);
+  const [bodyTitle, setBodyTitle] = useState('');
+  const [bodyText, setBodyText] = useState('');
   const citationHighlightTimer = useRef<number | null>(null);
   const [mentionMenu, setMentionMenu] = useState<MentionMenu | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
@@ -85,6 +92,11 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
   const openCommentPanel = () => {
     setIsSidebarOpen(false);
     setIsCommentPanelOpen(true);
+  };
+  const saveTitle = () => {
+    const title = titleDraft.trim();
+    onUpdateDoc?.(doc.id, { title: title || '未命名文档', isUntitled: !title });
+    setIsEditingTitle(false);
   };
   const openRolePanel = () => {
     setIsCommentPanelOpen(false);
@@ -450,11 +462,9 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
             </button>
           )}
           <div className="flex items-center gap-1.5 text-sm text-zinc-500 font-medium">
-            <span className="hover:text-zinc-900 cursor-pointer transition-colors">工作区</span>
-            <span className="text-zinc-300">/</span>
-            <span className="hover:text-zinc-900 cursor-pointer transition-colors">项目</span>
-            <span className="text-zinc-300">/</span>
-            <span className="text-zinc-900">{doc.title}</span>
+            <span>文档</span><span className="text-zinc-300">/</span><span>{libraryName || '文档库'}</span><span className="text-zinc-300">/</span>
+            {isEditingTitle ? <input autoFocus value={titleDraft} onChange={event => setTitleDraft(event.target.value)} onBlur={saveTitle} onKeyDown={event => { if (event.key === 'Enter') saveTitle(); if (event.key === 'Escape') { setTitleDraft(doc.isUntitled ? '' : doc.title); setIsEditingTitle(false); } }} className="w-40 rounded border border-indigo-300 bg-white px-1.5 py-0.5 text-sm text-zinc-900 outline-none" /> : <button onClick={() => setIsEditingTitle(true)} className={`text-left ${doc.isUntitled ? 'text-zinc-400' : 'text-zinc-900'} hover:text-indigo-600`}>{doc.title}</button>}
+            {viewingDerivativeRole && <><span className="text-zinc-300">/</span><span className="text-zinc-900">{roles.find(role => role.id === viewingDerivativeRole)?.name} · 衍生文档</span></>}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -523,12 +533,11 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                 {doc.type === 'document' ? '文档' : doc.type === 'spreadsheet' ? '表格' : doc.type === 'presentation' ? '演示文稿' : '文件夹'}
               </span>
             </div>
-            
-            <h1 className="text-3xl font-bold text-zinc-900 tracking-tight mb-8 outline-none" contentEditable suppressContentEditableWarning>
-              {doc.title}
-            </h1>
 
-            {doc.content ? (
+            {doc.isBlank ? <input autoFocus value={bodyTitle} onChange={event => setBodyTitle(event.target.value)} placeholder="请输入标题" className="mb-8 w-full border-0 bg-transparent text-3xl font-bold tracking-tight text-zinc-900 placeholder:text-zinc-300 outline-none" /> : <h1 contentEditable suppressContentEditableWarning className="mb-8 cursor-text text-3xl font-bold tracking-tight text-zinc-900">{doc.title}</h1>}
+            {doc.isBlank ? (
+              <textarea value={bodyText} onChange={event => setBodyText(event.target.value)} onPaste={event => { const text = event.clipboardData.getData('text/plain'); if (!text) return; event.preventDefault(); onUpdateDoc?.(doc.id, { content: formatPlainTextAsDocument(text), isBlank: false }); }} placeholder="请尽情编辑文本吧……" className="min-h-[320px] w-full resize-none border-0 bg-transparent text-sm leading-relaxed text-zinc-700 placeholder:text-zinc-300 outline-none" />
+            ) : doc.content ? (
               <div 
                 className="imported-doc" 
                 dangerouslySetInnerHTML={{ __html: doc.content }} 

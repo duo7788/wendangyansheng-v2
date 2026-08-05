@@ -33,12 +33,13 @@ export default function App() {
   const [comments, setComments] = useState<DocComment[]>([]);
 
   const handleShareDoc = (chatId: string, doc: DocItem) => {
-    setChats(prev => prev.map(c => {
-      if (c.id === chatId) {
-        const messages = c.messages || [];
-        return {
-          ...c,
-          messages: [...messages, {
+    const recipientId = chats.find(chat => chat.id === chatId)?.user.id;
+    if (!recipientId || recipientId === activeUserId) return;
+    const participantIds = [activeUserId, recipientId].sort();
+    const existingDirectChat = chats.find(chat => (chat.participantIds || ['u_jobs', chat.user.id]).slice().sort().join(':') === participantIds.join(':'));
+    const targetChatId = existingDirectChat?.id || `direct-${participantIds.join('-')}`;
+    setChats(prev => {
+      const message = {
             id: 'm_' + Date.now(),
             senderId: activeUserId,
             content: '我分享了一个文档给你，请查看。',
@@ -46,16 +47,17 @@ export default function App() {
             type: 'shared_doc',
             docId: doc.id,
             docTitle: doc.title,
-            recipientId: c.user.id,
+            recipientId,
             readByUserIds: [activeUserId],
-          }],
-          lastMessage: `[分享文档] ${doc.title}`
-        };
-      }
-      return c;
-    }));
+          } as const;
+      const existing = prev.find(chat => chat.id === targetChatId);
+      if (existing) return prev.map(chat => chat.id === targetChatId ? { ...chat, messages: [...(chat.messages || []), message], lastMessage: `[分享文档] ${doc.title}` } : chat);
+      const recipient = USERS.find(user => user.id === recipientId);
+      if (!recipient) return prev;
+      return [...prev, { id: targetChatId, user: recipient, participantIds, lastMessage: `[分享文档] ${doc.title}`, timestamp: message.timestamp, unreadCount: 0, messages: [message] }];
+    });
     setActiveApp('messages');
-    setActiveItemId(chatId);
+    setActiveItemId(targetChatId);
   };
 
   const handleSendMessage = (chatId: string, content: string) => {
@@ -143,7 +145,7 @@ export default function App() {
   // A role view is intentionally not exposed merely because it exists. The
   // matching member must have received a document link in their own thread.
   const hasReceivedDocumentLink = Boolean(selectedDocId && chats.some(chat =>
-    chat.user.id === activeUserId && chat.messages?.some(message =>
+    chat.messages?.some(message =>
       message.type === 'shared_doc' && message.docId === selectedDocId && message.recipientId === activeUserId
     )
   ));
@@ -160,6 +162,7 @@ export default function App() {
     }));
     setActiveItemId(doc.id);
   };
+  const handleUpdateDoc = (docId: string, patch: Partial<DocItem>) => setLibraries(prev => prev.map(library => ({ ...library, docs: library.docs.map(doc => doc.id === docId ? { ...doc, ...patch, updatedAt: '刚刚' } : doc) })));
 
   const handleSelectApp = (app: AppIdentifier) => {
     setActiveApp(app);
@@ -201,6 +204,7 @@ export default function App() {
         libraries={libraries}
         chats={chats}
         onAddDoc={handleAddDoc}
+        onUpdateDoc={handleUpdateDoc}
         onShareDoc={handleShareDoc}
         onSendMessage={handleSendMessage}
         onMarkChatRead={handleMarkChatRead}

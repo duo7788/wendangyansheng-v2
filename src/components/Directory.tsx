@@ -52,7 +52,7 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
   const actualItemId = activeItemId ? activeItemId.split('|')[0] : null;
   // A member only sees their direct conversation with the document owner.
   // The owner sees all conversations they participate in.
-  const visibleChats = activeUserId === 'u_jobs' ? chats : chats.filter(chat => chat.user.id === activeUserId);
+  const visibleChats = chats.filter(chat => (chat.participantIds || ['u_jobs', chat.user.id]).includes(activeUserId));
 
   return (
     <motion.div 

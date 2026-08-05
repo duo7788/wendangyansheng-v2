@@ -85,11 +85,26 @@ export default function App() {
   };
 
   const handleAddComment = (comment: Omit<DocComment, 'id' | 'createdAt'>) => {
+    const createdAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setComments(prev => [...prev, {
       ...comment,
       id: `comment_${Date.now()}`,
-      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      createdAt,
+      readByOwner: false,
     }]);
+    const docTitle = libraries.flatMap(library => library.docs).find(doc => doc.id === comment.docId)?.title || '文档';
+    setChats(prev => prev.map(chat => chat.user.id === comment.authorId ? {
+      ...chat,
+      lastMessage: `[文档评论] ${docTitle}`,
+      timestamp: createdAt,
+    } : chat));
+  };
+
+  const handleMarkCommentsRead = (docId: string, authorId: string) => {
+    setComments(prev => prev.map(comment => comment.docId === docId && comment.authorId === authorId
+      ? { ...comment, readByOwner: true }
+      : comment
+    ));
   };
 
   const currentUserRole = USER_ROLE_BY_ID[activeUserId];
@@ -134,6 +149,7 @@ export default function App() {
         chats={chats}
         activeUserId={activeUserId}
         comments={comments}
+        onMarkCommentsRead={handleMarkCommentsRead}
         isCollapsed={isDirCollapsed}
         setIsCollapsed={setIsDirCollapsed}
       />
@@ -151,6 +167,7 @@ export default function App() {
         onApplyDerivation={handleApplyDerivation}
         comments={comments}
         onAddComment={handleAddComment}
+        onMarkCommentsRead={handleMarkCommentsRead}
         isDirCollapsed={isDirCollapsed}
         setIsDirCollapsed={setIsDirCollapsed}
         setActiveApp={setActiveApp}

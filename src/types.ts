@@ -46,7 +46,9 @@ export interface DocComment {
   docId: string;
   roleId: string;
   authorId: string;
-  citationId: '1' | '2';
+  citationId?: '1' | '2';
+  selectedText?: string;
   content: string;
   createdAt: string;
+  readByOwner?: boolean;
 }

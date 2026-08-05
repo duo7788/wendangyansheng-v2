@@ -12,11 +12,12 @@ interface DirectoryProps {
   chats?: ChatItem[];
   activeUserId: string;
   comments: DocComment[];
+  onMarkCommentsRead: (docId: string, authorId: string) => void;
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
 }
 
-export function Directory({ activeApp, activeItemId, setActiveItemId, libraries = [], chats = [], activeUserId, comments, isCollapsed, setIsCollapsed }: DirectoryProps) {
+export function Directory({ activeApp, activeItemId, setActiveItemId, libraries = [], chats = [], activeUserId, comments, onMarkCommentsRead, isCollapsed, setIsCollapsed }: DirectoryProps) {
   const [expandedLibs, setExpandedLibs] = useState<Record<string, boolean>>({
     'lib1': true,
     'lib2': true,
@@ -124,11 +125,11 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
               </button>
               {commentGroups.map(comment => {
                 const doc = libraries.flatMap(library => library.docs).find(item => item.id === comment.docId);
-                const count = chatComments.filter(item => item.docId === comment.docId).length;
-                return <button key={`review-${comment.docId}`} onClick={() => setActiveItemId(`review:${comment.docId}:${chat.user.id}`)} className={`ml-8 mt-1 w-[calc(100%-2rem)] flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs transition-colors ${activeItemId === `review:${comment.docId}:${chat.user.id}` ? 'bg-indigo-50 text-indigo-800' : 'text-zinc-500 hover:bg-zinc-100'}`}>
-                  <MessageSquare size={14} className="text-indigo-500" />
-                  <span className="truncate flex-1">{doc?.title || '文档评论'}</span>
-                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">{count}</span>
+                const unreadCount = chatComments.filter(item => item.docId === comment.docId && !item.readByOwner).length;
+                return <button key={`review-${comment.docId}`} onClick={() => { onMarkCommentsRead(comment.docId, chat.user.id); setActiveItemId(`review:${comment.docId}:${chat.user.id}`); }} className={`relative ml-8 mt-1 w-[calc(100%-2rem)] flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-xs shadow-sm transition-all ${activeItemId === `review:${comment.docId}:${chat.user.id}` ? 'border-indigo-200 bg-indigo-50 text-indigo-800' : 'border-zinc-200 bg-white text-zinc-600 hover:border-indigo-200 hover:bg-indigo-50/40'}`}>
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600"><MessageSquare size={14} /></span>
+                  <span className="truncate flex-1 font-medium">{doc?.title || '文档评论'}</span>
+                  {unreadCount > 0 && <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[#F7F8FA] bg-rose-500 px-1 text-[10px] font-bold text-white">{unreadCount}</span>}
                 </button>;
               })}
               </div>;

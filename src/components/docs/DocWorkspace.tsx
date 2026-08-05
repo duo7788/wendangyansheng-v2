@@ -1,7 +1,14 @@
 import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, Loader2, PanelLeftOpen, Plus, Eye, MessageCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DocItem, DocLibrary, ChatItem, DocComment } from '../../types';
+
+type CommentAnchor = {
+  citationId?: '1' | '2';
+  selectedText: string;
+  x: number;
+  y: number;
+};
 
 interface DocWorkspaceProps {
   doc: DocItem;
@@ -34,8 +41,8 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
   const [highlightedCitation, setHighlightedCitation] = useState<string | null>(null);
   const [citationPreview, setCitationPreview] = useState<'1' | '2' | null>(null);
   const [showOriginal, setShowOriginal] = useState(canManageDerivations);
-  const [commentMenuCitation, setCommentMenuCitation] = useState<'1' | '2' | null>(null);
-  const [commentingCitation, setCommentingCitation] = useState<'1' | '2' | null>(null);
+  const [commentAnchor, setCommentAnchor] = useState<CommentAnchor | null>(null);
+  const [isCommentComposerOpen, setIsCommentComposerOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
 
   useEffect(() => {
@@ -46,6 +53,17 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
     };
     document.addEventListener('pointerdown', closeCitationPreview);
     return () => document.removeEventListener('pointerdown', closeCitationPreview);
+  }, []);
+
+  useEffect(() => {
+    const closeCommentControls = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-comment-interaction]')) return;
+      setCommentAnchor(null);
+      setIsCommentComposerOpen(false);
+    };
+    document.addEventListener('pointerdown', closeCommentControls);
+    return () => document.removeEventListener('pointerdown', closeCommentControls);
   }, []);
 
   const [roles, setRoles] = useState([
@@ -136,12 +154,45 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
       <span className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-zinc-200 bg-white" />
     </span>
   ) : null;
+  const placeCommentAnchor = (selectedText: string, rect: DOMRect, citationId?: '1' | '2') => {
+    setCommentAnchor({
+      citationId,
+      selectedText: selectedText.slice(0, 180),
+      x: Math.min(Math.max(rect.left + rect.width / 2, 150), window.innerWidth - 150),
+      y: Math.max(rect.top - 10, 16),
+    });
+    setIsCommentComposerOpen(false);
+  };
+
+  const handleDerivativeSelection = () => {
+    if (canManageDerivations) return;
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim();
+    if (!selection || !selectedText || selection.rangeCount === 0) return;
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return;
+    placeCommentAnchor(selectedText, rect);
+  };
+
+  const handleCitationComment = (citationId: '1' | '2', event: MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    const selectedText = citationId === '1' ? '关键技术实现路径与架构设计' : '跨模块依赖关系及排期影响';
+    placeCommentAnchor(selectedText, event.currentTarget.getBoundingClientRect(), citationId);
+  };
+
   const submitComment = () => {
-    if (!commentingCitation || !commentDraft.trim()) return;
-    onAddComment({ docId: doc.id, roleId: initialRoleId || 'backend', authorId: activeUserId, citationId: commentingCitation, content: commentDraft.trim() });
+    if (!commentAnchor || !commentDraft.trim()) return;
+    onAddComment({
+      docId: doc.id,
+      roleId: initialRoleId || 'backend',
+      authorId: activeUserId,
+      citationId: commentAnchor.citationId,
+      selectedText: commentAnchor.selectedText,
+      content: commentDraft.trim(),
+    });
     setCommentDraft('');
-    setCommentingCitation(null);
-    setCommentMenuCitation(null);
+    setIsCommentComposerOpen(false);
+    setCommentAnchor(null);
   };
   
   return (
@@ -285,7 +336,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
 
         {/* Generated Document View */}
         {viewingDerivativeRole && (
-          <motion.div layout transition={{ duration: 0.26, ease: 'easeOut' }} className={`flex-1 min-w-0 overflow-y-auto bg-zinc-50/50 ${!canManageDerivations ? 'order-1' : 'order-2'}`}>
+          <motion.div onMouseUp={handleDerivativeSelection} layout transition={{ duration: 0.26, ease: 'easeOut' }} className={`flex-1 min-w-0 overflow-y-auto bg-zinc-50/50 ${!canManageDerivations ? 'order-1' : 'order-2'}`}>
             <div className="max-w-4xl mx-auto px-10 py-16">
               <div className="mb-6">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-100 text-xs font-medium text-indigo-700">
@@ -309,20 +360,11 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                      核心关注点提取
                    </h3>
                    <ul className="list-disc pl-5 space-y-2 text-zinc-600">
-                     <li>关键技术实现路径与架构设计 <span className="relative inline-block"><sup data-citation-trigger className="cursor-pointer text-indigo-500 hover:text-indigo-700" onClick={() => openCitation('1')} onContextMenu={event => { event.preventDefault(); setCommentMenuCitation('1'); }}>[1]</sup>{citationPreview === '1' && <span className="pointer-events-none absolute bottom-[calc(100%+14px)] left-1/2 z-30 block w-[390px] -translate-x-1/2"><span className="pointer-events-auto block">{renderCitationCard('1')}</span></span>}</span></li>
-                     <li>跨模块依赖关系及排期影响 <span className="relative inline-block"><sup data-citation-trigger className="cursor-pointer text-indigo-500 hover:text-indigo-700" onClick={() => openCitation('2')} onContextMenu={event => { event.preventDefault(); setCommentMenuCitation('2'); }}>[2]</sup>{citationPreview === '2' && <span className="pointer-events-none absolute bottom-[calc(100%+14px)] left-1/2 z-30 block w-[390px] -translate-x-1/2"><span className="pointer-events-auto block">{renderCitationCard('2')}</span></span>}</span></li>
+                     <li>关键技术实现路径与架构设计 <span className="relative inline-block"><sup data-citation-trigger className="cursor-pointer text-indigo-500 hover:text-indigo-700" onClick={() => openCitation('1')} onContextMenu={event => handleCitationComment('1', event)}>[1]</sup>{citationPreview === '1' && <span className="pointer-events-none absolute bottom-[calc(100%+14px)] left-1/2 z-30 block w-[390px] -translate-x-1/2"><span className="pointer-events-auto block">{renderCitationCard('1')}</span></span>}</span></li>
+                     <li>跨模块依赖关系及排期影响 <span className="relative inline-block"><sup data-citation-trigger className="cursor-pointer text-indigo-500 hover:text-indigo-700" onClick={() => openCitation('2')} onContextMenu={event => handleCitationComment('2', event)}>[2]</sup>{citationPreview === '2' && <span className="pointer-events-none absolute bottom-[calc(100%+14px)] left-1/2 z-30 block w-[390px] -translate-x-1/2"><span className="pointer-events-auto block">{renderCitationCard('2')}</span></span>}</span></li>
                      <li>从关联文档中提取的风险预警</li>
                    </ul>
                 </div>
-                {commentMenuCitation && <div className="relative w-44 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg">
-                  <button onClick={() => setCommentingCitation(commentMenuCitation)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"><MessageCircle size={15} /> 评论</button>
-                </div>}
-                {commentingCitation && <div className="rounded-xl border border-indigo-200 bg-white p-4 shadow-sm">
-                  <div className="mb-2 text-sm font-semibold text-zinc-900">评论引用 [{commentingCitation}]</div>
-                  <textarea value={commentDraft} onChange={event => setCommentDraft(event.target.value)} placeholder="写下你的评论…" className="min-h-20 w-full resize-none rounded-lg border border-zinc-200 p-2 text-sm outline-none focus:border-indigo-400" />
-                  <div className="mt-3 flex justify-end gap-2"><button onClick={() => setCommentingCitation(null)} className="px-3 py-1.5 text-sm text-zinc-500">取消</button><button onClick={submitComment} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">发送</button></div>
-                </div>}
-                
                 <h3 className="text-lg font-semibold text-zinc-900 mt-8 mb-4">
                   行动建议 (Action Items)
                 </h3>
@@ -340,6 +382,46 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
             </div>
           </motion.div>
         )}
+
+        <AnimatePresence>
+          {commentAnchor && !isCommentComposerOpen && (
+            <motion.div
+              data-comment-interaction
+              initial={{ opacity: 0, y: 6, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 4, scale: 0.96 }}
+              transition={{ duration: 0.16, ease: 'easeOut' }}
+              style={{ left: commentAnchor.x, top: Math.max(commentAnchor.y - 48, 12) }}
+              className="fixed z-50 -translate-x-1/2 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl"
+              onMouseDown={event => event.preventDefault()}
+            >
+              <button onClick={() => setIsCommentComposerOpen(true)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700">
+                <MessageCircle size={16} /> 评论
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {commentAnchor && isCommentComposerOpen && (
+            <motion.div
+              data-comment-interaction
+              initial={{ opacity: 0, y: 8, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.97 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              style={{ left: commentAnchor.x, top: Math.min(commentAnchor.y + 12, window.innerHeight - 250) }}
+              className="fixed z-50 w-[320px] -translate-x-1/2 rounded-2xl border border-indigo-100 bg-white p-4 shadow-2xl"
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0"><p className="text-sm font-semibold text-zinc-900">添加评论</p><p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-500">“{commentAnchor.selectedText}”</p></div>
+                <button onClick={() => { setIsCommentComposerOpen(false); setCommentAnchor(null); }} aria-label="关闭评论" className="rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><X size={16} /></button>
+              </div>
+              <textarea autoFocus value={commentDraft} onChange={event => setCommentDraft(event.target.value)} placeholder="写下你的评论…" className="min-h-24 w-full resize-none rounded-xl border border-zinc-200 p-3 text-sm outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+              <div className="mt-3 flex justify-end gap-2"><button onClick={() => { setIsCommentComposerOpen(false); setCommentAnchor(null); }} className="px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-700">取消</button><button disabled={!commentDraft.trim()} onClick={submitComment} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">发送</button></div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Derivative Sidebar */}
         <AnimatePresence initial={false}>

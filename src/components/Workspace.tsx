@@ -19,13 +19,14 @@ interface WorkspaceProps {
   onApplyDerivation: (docId: string, roleId: string, shouldApply: boolean) => void;
   comments: DocComment[];
   onAddComment: (comment: Omit<DocComment, 'id' | 'createdAt'>) => void;
+  onMarkCommentsRead: (docId: string, authorId: string) => void;
   isDirCollapsed: boolean;
   setIsDirCollapsed: (collapsed: boolean) => void;
   setActiveApp: (app: AppIdentifier) => void;
   setActiveItemId: (id: string | null) => void;
 }
 
-export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onShareDoc, onSendMessage, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, comments, onAddComment, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
+export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onShareDoc, onSendMessage, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, comments, onAddComment, onMarkCommentsRead, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
   
   const renderContent = () => {
     const reviewMatch = activeItemId?.match(/^review:([^:]+):([^:]+)$/);

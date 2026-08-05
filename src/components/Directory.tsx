@@ -50,6 +50,9 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
   };
 
   const actualItemId = activeItemId ? activeItemId.split('|')[0] : null;
+  // A member only sees their direct conversation with the document owner.
+  // The owner sees all conversations they participate in.
+  const visibleChats = activeUserId === 'u_jobs' ? chats : chats.filter(chat => chat.user.id === activeUserId);
 
   return (
     <motion.div 
@@ -90,12 +93,21 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
               transition={{ duration: 0.15 }}
               className="flex flex-col gap-1"
             >
-            {activeApp === 'messages' && chats.map((chat) => (
+            {activeApp === 'messages' && visibleChats.map((chat) => (
               (() => {
                 const isOwner = activeUserId === 'u_jobs';
-                const displayUser = !isOwner && chat.user.id === activeUserId
-                  ? USERS.find(user => user.id === 'u_jobs') || chat.user
-                  : chat.user;
+                const latestMessage = [...(chat.messages || [])].reverse()[0];
+                const partnerId = latestMessage
+                  ? latestMessage.senderId === activeUserId
+                    ? latestMessage.recipientId || chat.user.id
+                    : latestMessage.senderId
+                  : !isOwner && chat.user.id === activeUserId
+                    ? 'u_jobs'
+                    : chat.user.id;
+                const displayUser = USERS.find(user => user.id === partnerId) || chat.user;
+                const unreadCount = (chat.messages || []).filter(message =>
+                  message.recipientId === activeUserId && !message.readByUserIds?.includes(activeUserId)
+                ).length;
                 const unreadEvents = isOwner
                   ? comments.filter(comment => comment.authorId === chat.user.id && !comment.readByOwner)
                   : chat.user.id === activeUserId
@@ -125,9 +137,9 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
                   </div>
                   <p className="text-sm text-zinc-500 truncate">{chat.lastMessage}</p>
                 </div>
-                {chat.unreadCount > 0 && (
+                {unreadCount > 0 && (
                   <div className="mt-1 flex items-center justify-center w-5 h-5 bg-blue-600 rounded-full text-[10px] font-bold text-white shrink-0">
-                    {chat.unreadCount}
+                    {unreadCount}
                   </div>
                 )}
               </button>

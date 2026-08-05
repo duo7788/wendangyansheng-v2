@@ -13,6 +13,7 @@ interface WorkspaceProps {
   onAddDoc: (libId: string, doc: DocItem) => void;
   onShareDoc: (chatId: string, doc: DocItem) => void;
   onSendMessage: (chatId: string, content: string) => void;
+  onMarkChatRead: (chatId: string, viewerId: string) => void;
   activeUserId: string;
   initialDerivativeRole: string | null;
   appliedRoleIds: Set<string>;
@@ -26,7 +27,7 @@ interface WorkspaceProps {
   setActiveItemId: (id: string | null) => void;
 }
 
-export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onShareDoc, onSendMessage, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, comments, onAddComment, onMarkCommentsRead, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
+export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, comments, onAddComment, onMarkCommentsRead, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
   
   const renderContent = () => {
     const reviewMatch = activeItemId?.match(/^review:([^:]+):([^:]+)$/);
@@ -61,7 +62,7 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
 
     if (activeApp === 'messages') {
       const chat = chats.find(c => c.id === activeItemId);
-      if (chat) return <ChatWorkspace chat={chat} activeUserId={activeUserId} setActiveApp={setActiveApp} setActiveItemId={setActiveItemId} onSendMessage={onSendMessage} />;
+      if (chat) return <ChatWorkspace chat={chat} activeUserId={activeUserId} setActiveApp={setActiveApp} setActiveItemId={setActiveItemId} onSendMessage={onSendMessage} onMarkChatRead={onMarkChatRead} />;
     }
 
     if (activeApp === 'docs') {

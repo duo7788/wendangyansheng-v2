@@ -15,6 +15,10 @@ export interface Message {
   type: 'text' | 'shared_doc';
   docId?: string;
   docTitle?: string;
+  /** The member selected in the share dialog. Shared documents are private to this recipient and the sender. */
+  recipientId?: string;
+  /** Message-level read receipts keep each participant's unread badge independent. */
+  readByUserIds?: string[];
 }
 
 export interface ChatItem {

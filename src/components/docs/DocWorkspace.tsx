@@ -1,5 +1,5 @@
-import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, Loader2, PanelLeftOpen, Plus, Eye, MessageCircle } from 'lucide-react';
-import { useEffect, useState, type MouseEvent } from 'react';
+import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, Loader2, PanelLeftOpen, Plus, Eye, MessageCircle, AtSign } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DocItem, DocLibrary, ChatItem, DocComment } from '../../types';
 
@@ -10,6 +10,32 @@ type CommentAnchor = {
   x: number;
   y: number;
 };
+
+type GeneratedDerivation = {
+  content: string;
+  relatedDocumentIds: string[];
+  generatedAt: string;
+};
+
+type MentionMenu = {
+  query: string;
+  range: Range;
+  x: number;
+  y: number;
+};
+
+// The current prototype keeps its source document in the editor markup rather
+// than a database.  This supplies that same source to Kimi until document
+// editing is persisted in Supabase.
+const getSourceDocumentContent = () => `本文档作为项目的唯一事实来源。请确保在周五的站会之前，所有更新都已与相应的设计资产同步。
+
+1. 执行摘要
+我们的目标是整合所有平台的设计语言系统。主要目标是减少认知负荷，同时保持企业客户所需的高端质感。新界面在很大程度上依赖于微妙的对比度、精确的间距比例以及让人感觉自然而非机械的运动曲线。
+
+2. 关键交付物
+- 确定间距令牌和排版比例。
+- 跨 React 和 Figma 的组件库一致性。
+- 针对所有界面颜色的 WCAG AA 无障碍标准合规性审计。`;
 
 interface DocWorkspaceProps {
   doc: DocItem;
@@ -40,14 +66,21 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
   const [activeDerivativeRoles, setActiveDerivativeRoles] = useState<string[]>(Array.from(appliedRoleIds));
   const [activeDerivativeDocs, setActiveDerivativeDocs] = useState<string[]>([]);
   const [loadingRoles, setLoadingRoles] = useState<Record<string, boolean>>({});
+  const [generatedDerivations, setGeneratedDerivations] = useState<Record<string, GeneratedDerivation>>({});
+  const [generationErrors, setGenerationErrors] = useState<Record<string, string>>({});
   const [viewingDerivativeRole, setViewingDerivativeRole] = useState<string | null>(reviewMode && canManageDerivations ? null : initialRoleId || null);
   const [highlightedCitation, setHighlightedCitation] = useState<string | null>(null);
   const [citationPreview, setCitationPreview] = useState<'1' | '2' | null>(null);
-  const [showOriginal, setShowOriginal] = useState(canManageDerivations);
+  // Recipients with an applied role open their dedicated view. Everyone else
+  // opens the original document rather than an empty workspace.
+  const [showOriginal, setShowOriginal] = useState(canManageDerivations || !initialRoleId);
   const [commentAnchor, setCommentAnchor] = useState<CommentAnchor | null>(null);
   const [isCommentComposerOpen, setIsCommentComposerOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const citationHighlightTimer = useRef<number | null>(null);
+  const [mentionMenu, setMentionMenu] = useState<MentionMenu | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
 
   const openCommentPanel = () => {
     setIsSidebarOpen(false);
@@ -62,14 +95,48 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
     setActiveDerivativeRoles(previous => Array.from(new Set([...previous, ...Array.from(appliedRoleIds)])));
   }, [appliedRoleIds]);
 
+  // Restore previously generated content after a refresh or when a document is reopened.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/derivations?sourceDocumentId=${encodeURIComponent(doc.id)}`)
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('无法读取已保存的衍生文档')))
+      .then(data => {
+        if (cancelled) return;
+        const restored = (data.derivations || []).reduce((result: Record<string, GeneratedDerivation>, item: { role_id: string; content: string; related_document_ids: string[]; updated_at: string }) => {
+          result[item.role_id] = { content: item.content, relatedDocumentIds: item.related_document_ids || [], generatedAt: item.updated_at };
+          return result;
+        }, {});
+        setGeneratedDerivations(restored);
+        setActiveDerivativeRoles(previous => Array.from(new Set([...previous, ...Object.keys(restored)])));
+      })
+      // The endpoint is unavailable in plain `vite` development. Vercel deploys it.
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [doc.id]);
+
   useEffect(() => {
     const closeCitationPreview = (event: PointerEvent) => {
       const target = event.target;
       if (target instanceof Element && target.closest('[data-citation-popover], [data-citation-trigger]')) return;
       setCitationPreview(null);
+      setHighlightedCitation(null);
     };
     document.addEventListener('pointerdown', closeCitationPreview);
     return () => document.removeEventListener('pointerdown', closeCitationPreview);
+  }, []);
+
+  useEffect(() => () => {
+    if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const closeMentionMenu = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-mention-menu]')) return;
+      setMentionMenu(null);
+    };
+    document.addEventListener('pointerdown', closeMentionMenu);
+    return () => document.removeEventListener('pointerdown', closeMentionMenu);
   }, []);
 
   useEffect(() => {
@@ -121,33 +188,147 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
     });
   };
 
+  const allDocs = libraries.flatMap(lib => lib.docs);
+  // A document has one role in a source document: it is either the current
+  // document, a collaborative related document, or a read-only citation.
+  const unavailableCitationIds = new Set([doc.id, ...Array.from(selectedDocIds), ...activeDerivativeDocs]);
+  const mentionableDocs = allDocs.filter(item => item.type !== 'folder');
+  const matchingMentionDocs = mentionMenu
+    ? mentionableDocs.filter(item => item.title.toLocaleLowerCase().includes(mentionMenu.query.toLocaleLowerCase()))
+    : [];
+  const selectableMentionDocs = matchingMentionDocs.filter(item => !unavailableCitationIds.has(item.id));
+
+  const updateMentionMenu = () => {
+    if (!canManageDerivations) return;
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !selection.isCollapsed || selection.anchorNode?.nodeType !== Node.TEXT_NODE) {
+      setMentionMenu(null);
+      return;
+    }
+    const typedText = selection.anchorNode.textContent?.slice(0, selection.anchorOffset) || '';
+    const match = typedText.match(/@([^\s@]*)$/);
+    if (!match) {
+      setMentionMenu(null);
+      return;
+    }
+    const range = selection.getRangeAt(0).cloneRange();
+    const rect = range.getBoundingClientRect();
+    setMentionMenu({
+      query: match[1],
+      range,
+      x: Math.min(Math.max(rect.left, 16), window.innerWidth - 336),
+      y: Math.min(rect.bottom + 8, window.innerHeight - 300),
+    });
+    setActiveMentionIndex(0);
+  };
+
+  const insertCitationMention = (referenceDoc: DocItem) => {
+    if (!mentionMenu || mentionMenu.range.startContainer.nodeType !== Node.TEXT_NODE) return;
+    const range = mentionMenu.range.cloneRange();
+    const triggerLength = mentionMenu.query.length + 1;
+    range.setStart(range.startContainer, Math.max(0, range.startOffset - triggerLength));
+    range.deleteContents();
+    const citation = document.createElement('span');
+    citation.contentEditable = 'false';
+    citation.dataset.citationDocumentId = referenceDoc.id;
+    citation.title = `引用文档：${referenceDoc.title}`;
+    citation.className = 'mx-1 inline-flex cursor-default select-none items-center rounded-md border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 align-baseline text-sm font-medium text-indigo-700';
+    citation.textContent = `引用 · ${referenceDoc.title}`;
+    const trailingSpace = document.createTextNode(' ');
+    range.insertNode(trailingSpace);
+    range.insertNode(citation);
+    const selection = window.getSelection();
+    const caret = document.createRange();
+    caret.setStartAfter(trailingSpace);
+    caret.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(caret);
+    setMentionMenu(null);
+  };
+
+  const handleEditorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!mentionMenu) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setMentionMenu(null);
+    } else if (event.key === 'ArrowDown' && selectableMentionDocs.length) {
+      event.preventDefault();
+      setActiveMentionIndex(index => (index + 1) % selectableMentionDocs.length);
+    } else if (event.key === 'ArrowUp' && selectableMentionDocs.length) {
+      event.preventDefault();
+      setActiveMentionIndex(index => (index - 1 + selectableMentionDocs.length) % selectableMentionDocs.length);
+    } else if (event.key === 'Enter' && selectableMentionDocs[activeMentionIndex]) {
+      event.preventDefault();
+      insertCitationMention(selectableMentionDocs[activeMentionIndex]);
+    }
+  };
+
+  const generateForRole = async (roleId: string, relatedDocIds: string[]) => {
+    const role = roles.find(item => item.id === roleId);
+    if (!role) return;
+    setLoadingRoles(prev => ({ ...prev, [roleId]: true }));
+    setGenerationErrors(prev => ({ ...prev, [roleId]: '' }));
+    try {
+      const relatedDocuments = allDocs.filter(item => relatedDocIds.includes(item.id)).map(item => ({
+        id: item.id,
+        title: item.title,
+        content: item.content || '',
+      }));
+      const response = await fetch('/api/generate-derivation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceDocument: { id: doc.id, title: doc.title, content: doc.content || getSourceDocumentContent() },
+          role: { id: role.id, name: role.name },
+          relatedDocuments,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '生成失败');
+      setGeneratedDerivations(prev => ({
+        ...prev,
+        [roleId]: {
+          content: data.derivation.content,
+          relatedDocumentIds: data.derivation.related_document_ids || relatedDocIds,
+          generatedAt: data.derivation.updated_at,
+        },
+      }));
+    } catch (error) {
+      setGenerationErrors(prev => ({ ...prev, [roleId]: error instanceof Error ? error.message : '生成失败，请稍后重试' }));
+    } finally {
+      setLoadingRoles(prev => ({ ...prev, [roleId]: false }));
+    }
+  };
+
   const handleGenerate = () => {
     const rolesArray = (Array.from(selectedRoleIds) as string[]).filter(roleId => !appliedRoleIds.has(roleId));
     if (rolesArray.length === 0) return;
-    setActiveDerivativeRoles(rolesArray);
+    setActiveDerivativeRoles(previous => Array.from(new Set([...previous, ...rolesArray])));
     setActiveDerivativeDocs(Array.from(selectedDocIds) as string[]);
     
-    const initialLoadingState: Record<string, boolean> = {};
-    rolesArray.forEach((r: string) => {
-      initialLoadingState[r] = true;
-    });
-    setLoadingRoles(initialLoadingState);
-
     setIsRoleModalOpen(false);
     setIsSidebarOpen(true);
     setIsDirCollapsed(true);
     setViewingDerivativeRole(null);
     
-    rolesArray.forEach((r: string, index) => {
-      setTimeout(() => {
-        setLoadingRoles(prev => ({ ...prev, [r]: false }));
-      }, 1500 + index * 800);
-    });
+    void Promise.all(rolesArray.map(roleId => generateForRole(roleId, Array.from(selectedDocIds))));
   };
 
-  const allDocs = libraries.flatMap(lib => lib.docs);
   const selectedDocs = allDocs.filter(d => selectedDocIds.has(d.id));
+  const flashOriginalCitation = (citationId: '1' | '2') => {
+    setHighlightedCitation(citationId);
+    if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
+    citationHighlightTimer.current = window.setTimeout(() => {
+      setHighlightedCitation(null);
+      citationHighlightTimer.current = null;
+    }, 1000);
+  };
   const openCitation = (citationId: '1' | '2') => {
+    if (showOriginal) {
+      setCitationPreview(null);
+      flashOriginalCitation(citationId);
+      return;
+    }
     setCitationPreview(citationId);
     setHighlightedCitation(citationId);
   };
@@ -155,8 +336,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
     const citationToHighlight = citationPreview;
     setCitationPreview(null);
     setShowOriginal(true);
-    if (citationToHighlight) setHighlightedCitation(citationToHighlight);
-    setTimeout(() => setHighlightedCitation(null), 1600);
+    if (citationToHighlight) flashOriginalCitation(citationToHighlight);
   };
   const closeOriginal = () => {
     setShowOriginal(false);
@@ -337,14 +517,14 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
           className={`relative flex-1 min-w-0 overflow-y-auto ${viewingDerivativeRole ? 'border-r border-zinc-200' : ''} ${!canManageDerivations ? 'order-2 bg-white' : 'order-1'}`}
         >
           {!canManageDerivations && <button onClick={closeOriginal} aria-label="关闭原文" className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-700"><X size={17} /></button>}
-          <div className="max-w-4xl mx-auto px-12 py-16">
+          <div onKeyUp={updateMentionMenu} onKeyDown={handleEditorKeyDown} className="max-w-4xl mx-auto px-12 py-16">
             <div className="mb-6 flex items-center gap-3">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-100 text-xs font-medium text-zinc-600">
                 {doc.type === 'document' ? '文档' : doc.type === 'spreadsheet' ? '表格' : doc.type === 'presentation' ? '演示文稿' : '文件夹'}
               </span>
             </div>
             
-            <h1 className="text-4xl md:text-5xl font-bold text-zinc-900 tracking-tight mb-8 outline-none" contentEditable suppressContentEditableWarning>
+            <h1 className="text-3xl font-bold text-zinc-900 tracking-tight mb-8 outline-none" contentEditable suppressContentEditableWarning>
               {doc.title}
             </h1>
 
@@ -356,12 +536,12 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                 suppressContentEditableWarning 
               />
             ) : (
-              <div className="space-y-6 text-base text-zinc-700 leading-relaxed font-normal">
+              <div className="space-y-6 text-sm text-zinc-700 leading-relaxed font-normal">
                 <p className="outline-none" contentEditable suppressContentEditableWarning>
                   本文档作为项目的唯一事实来源。请确保在周五的站会之前，所有更新都已与相应的设计资产同步。
                 </p>
 
-                <h3 className="text-xl font-semibold text-zinc-900 mt-12 mb-4 outline-none" contentEditable suppressContentEditableWarning>
+                <h3 className="text-lg font-semibold text-zinc-900 mt-12 mb-4 outline-none" contentEditable suppressContentEditableWarning>
                   1. 执行摘要
                 </h3>
                 
@@ -381,7 +561,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                   </div>
                 </div>
 
-                <h3 className="text-xl font-semibold text-zinc-900 mt-12 mb-4 outline-none" contentEditable suppressContentEditableWarning>
+                <h3 className="text-lg font-semibold text-zinc-900 mt-12 mb-4 outline-none" contentEditable suppressContentEditableWarning>
                   2. 关键交付物
                 </h3>
                 <ul className={`list-disc pl-5 space-y-2 outline-none transition-colors duration-500 ${highlightedCitation === '2' ? 'bg-amber-100/80 rounded px-1 py-1' : ''}`} contentEditable suppressContentEditableWarning>
@@ -393,6 +573,40 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
               </div>
             )}
           </div>
+          <AnimatePresence>
+            {mentionMenu && <motion.div
+              data-mention-menu
+              role="listbox"
+              aria-label="插入引用文档"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+              style={{ left: mentionMenu.x, top: mentionMenu.y }}
+              className="fixed z-50 w-80 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl"
+            >
+              <div className="flex items-center gap-2 px-2.5 py-2 text-xs font-medium text-zinc-500"><AtSign size={14} className="text-indigo-600" />引用文档</div>
+              {matchingMentionDocs.length ? matchingMentionDocs.map(item => {
+                const unavailable = unavailableCitationIds.has(item.id);
+                const selectableIndex = selectableMentionDocs.findIndex(candidate => candidate.id === item.id);
+                return <button
+                  key={item.id}
+                  type="button"
+                  role="option"
+                  disabled={unavailable}
+                  aria-selected={!unavailable && selectableIndex === activeMentionIndex}
+                  aria-label={`${item.title}${item.id === doc.id ? '，当前原文档，不可引用' : unavailable ? '，已关联为协作文档，不可引用' : ''}`}
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => insertCitationMention(item)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors ${unavailable ? 'cursor-not-allowed opacity-45' : selectableIndex === activeMentionIndex ? 'bg-indigo-50 text-indigo-900' : 'text-zinc-700 hover:bg-zinc-50'}`}
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500"><FileText size={15} /></span>
+                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.title}</span><span className="mt-0.5 block text-xs text-zinc-400">{item.author} · {item.updatedAt}</span></span>
+                  {unavailable && <span className="shrink-0 text-xs text-zinc-400">{item.id === doc.id ? '当前文档' : '已关联'}</span>}
+                </button>;
+              }) : <p className="px-2.5 py-5 text-center text-sm text-zinc-400">没有匹配的文档</p>}
+            </motion.div>}
+          </AnimatePresence>
         </motion.div>}
         </AnimatePresence>
 
@@ -410,6 +624,11 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                 {doc.title}
               </h1>
               
+              {generatedDerivations[viewingDerivativeRole] ? (
+                <article className="space-y-3 whitespace-pre-wrap text-sm leading-7 text-zinc-700">
+                  {generatedDerivations[viewingDerivativeRole].content}
+                </article>
+              ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed">
                 <p>
                   此文档是基于 <span className="font-semibold">{doc.title}</span> 
@@ -441,6 +660,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                   ))}
                 </div>
               </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -536,9 +756,9 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                         </div>
                       </div>
                       
-                      {activeDerivativeDocs.length > 0 && (
+                      {(generatedDerivations[roleId]?.relatedDocumentIds || activeDerivativeDocs).length > 0 && (
                         <div className="flex flex-col gap-1.5 mt-1">
-                          {activeDerivativeDocs.map(docId => {
+                          {(generatedDerivations[roleId]?.relatedDocumentIds || activeDerivativeDocs).map(docId => {
                             const d = allDocs.find(x => x.id === docId);
                             return (
                                <span key={docId} className="text-xs px-2.5 py-1.5 bg-zinc-50 text-zinc-600 rounded-md flex items-center gap-1.5 truncate">
@@ -556,7 +776,9 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                           <span className="font-medium">AI 正在生成专属视图...</span>
                         </div>
                       ) : (
-                        <div className="mt-2 flex gap-2">
+                        <div className="mt-2">
+                          {generationErrors[roleId] && <p className="mb-2 rounded-lg bg-rose-50 p-2 text-xs leading-relaxed text-rose-700">{generationErrors[roleId]}</p>}
+                          <div className="flex gap-2">
                           <button 
                             onClick={() => setViewingDerivativeRole(isViewing ? null : roleId)}
                             className={`flex-[1.2] text-xs font-medium py-2 rounded-lg transition-colors flex items-center justify-center ${
@@ -569,8 +791,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                           </button>
                           {canManageDerivations && <button 
                             onClick={() => {
-                              setLoadingRoles(prev => ({ ...prev, [roleId]: true }));
-                              setTimeout(() => setLoadingRoles(prev => ({ ...prev, [roleId]: false })), 1500);
+                              void generateForRole(roleId, generatedDerivations[roleId]?.relatedDocumentIds || activeDerivativeDocs);
                             }}
                             className="flex-1 text-xs font-medium py-2 bg-zinc-100 text-zinc-700 rounded-lg hover:bg-zinc-200 transition-colors flex items-center justify-center"
                           >
@@ -586,6 +807,7 @@ export function DocWorkspace({ doc, libraries, chats, onShareDoc, isDirCollapsed
                           >
                             {appliedRoleIds.has(roleId) ? '已应用' : '应用'}
                           </button>}
+                          </div>
                         </div>
                       )}
                     </div>

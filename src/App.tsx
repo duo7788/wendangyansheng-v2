@@ -45,7 +45,9 @@ export default function App() {
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             type: 'shared_doc',
             docId: doc.id,
-            docTitle: doc.title
+            docTitle: doc.title,
+            recipientId: c.user.id,
+            readByUserIds: [activeUserId],
           }],
           lastMessage: `[分享文档] ${doc.title}`
         };
@@ -60,17 +62,41 @@ export default function App() {
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setChats(prev => prev.map(chat => chat.id === chatId ? {
       ...chat,
+      // Reply to the actual participant in the latest message. This matters
+      // when a document has been forwarded by someone other than its owner.
+      // Falling back to the legacy chat owner keeps the seeded demo chats working.
       messages: [...(chat.messages || []), {
         id: `m_${Date.now()}`,
         senderId: activeUserId,
+        recipientId: (() => {
+          const latest = [...(chat.messages || [])].reverse()[0];
+          if (latest) return latest.senderId === activeUserId ? latest.recipientId || chat.user.id : latest.senderId;
+          return chat.user.id === activeUserId ? 'u_jobs' : chat.user.id;
+        })(),
         content,
         timestamp,
         type: 'text',
+        readByUserIds: [activeUserId],
       }],
       lastMessage: content,
       timestamp,
       unreadCount: 0,
     } : chat));
+  };
+
+  const handleMarkChatRead = (chatId: string, viewerId: string) => {
+    setChats(prev => {
+      let changed = false;
+      const next = prev.map(chat => chat.id !== chatId ? chat : {
+        ...chat,
+        messages: (chat.messages || []).map(message => {
+          if (message.recipientId !== viewerId || message.readByUserIds?.includes(viewerId)) return message;
+          changed = true;
+          return { ...message, readByUserIds: [...(message.readByUserIds || []), viewerId] };
+        }),
+      });
+      return changed ? next : prev;
+    });
   };
 
   const handleApplyDerivation = (docId: string, roleId: string, shouldApply: boolean) => {
@@ -114,7 +140,14 @@ export default function App() {
 
   const currentUserRole = USER_ROLE_BY_ID[activeUserId];
   const selectedDocId = activeItemId?.split('|')[0];
-  const initialDerivativeRole = activeApp === 'docs' && selectedDocId && currentUserRole && appliedDerivations[selectedDocId]?.has(currentUserRole)
+  // A role view is intentionally not exposed merely because it exists. The
+  // matching member must have received a document link in their own thread.
+  const hasReceivedDocumentLink = Boolean(selectedDocId && chats.some(chat =>
+    chat.user.id === activeUserId && chat.messages?.some(message =>
+      message.type === 'shared_doc' && message.docId === selectedDocId && message.recipientId === activeUserId
+    )
+  ));
+  const initialDerivativeRole = activeApp === 'docs' && selectedDocId && currentUserRole && hasReceivedDocumentLink && appliedDerivations[selectedDocId]?.has(currentUserRole)
     ? currentUserRole
     : null;
 
@@ -170,6 +203,7 @@ export default function App() {
         onAddDoc={handleAddDoc}
         onShareDoc={handleShareDoc}
         onSendMessage={handleSendMessage}
+        onMarkChatRead={handleMarkChatRead}
         activeUserId={activeUserId}
         initialDerivativeRole={initialDerivativeRole}
         appliedRoleIds={selectedDocId ? appliedDerivations[selectedDocId] || new Set<string>() : new Set<string>()}

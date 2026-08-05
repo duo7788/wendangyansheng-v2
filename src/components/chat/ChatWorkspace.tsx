@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Phone, Video, MoreHorizontal, Paperclip, Smile, Send, FileText } from 'lucide-react';
-import { ChatItem, AppIdentifier } from '../../types';
+import { ChatItem, AppIdentifier, Message } from '../../types';
 import { USERS } from '../../App';
 
 interface ChatWorkspaceProps {
@@ -9,17 +9,15 @@ interface ChatWorkspaceProps {
   setActiveApp: (app: AppIdentifier) => void;
   setActiveItemId: (id: string | null) => void;
   onSendMessage: (chatId: string, content: string) => void;
+  onMarkChatRead: (chatId: string, viewerId: string) => void;
 }
 
-export function ChatWorkspace({ chat, activeUserId, setActiveApp, setActiveItemId, onSendMessage }: ChatWorkspaceProps) {
+export function ChatWorkspace({ chat, activeUserId, setActiveApp, setActiveItemId, onSendMessage, onMarkChatRead }: ChatWorkspaceProps) {
   const [draft, setDraft] = useState('');
   const activeUser = USERS.find(u => u.id === activeUserId);
-  const otherUser = chat.user.id === activeUserId
-    ? USERS.find(user => user.id === 'u_jobs') || chat.user
-    : chat.user;
   
   // Just for demonstration, if messages are empty, we can mock the default conversation.
-  const defaultMessages = [
+  const defaultMessages: Message[] = [
     {
       id: 'm1',
       senderId: chat.user.id,
@@ -43,13 +41,27 @@ export function ChatWorkspace({ chat, activeUserId, setActiveApp, setActiveItemI
     }
   ];
 
-  const messages = chat.messages && chat.messages.length > 0 ? chat.messages : defaultMessages;
+  const messages = (chat.messages && chat.messages.length > 0 ? chat.messages : defaultMessages)
+    .filter(message => message.type !== 'shared_doc' || !message.recipientId || message.senderId === activeUserId || message.recipientId === activeUserId);
+  const latestMessage = [...messages].reverse()[0];
+  const partnerId = latestMessage
+    ? latestMessage.senderId === activeUserId
+      ? latestMessage.recipientId || chat.user.id
+      : latestMessage.senderId
+    : chat.user.id === activeUserId
+      ? 'u_jobs'
+      : chat.user.id;
+  const otherUser = USERS.find(user => user.id === partnerId) || chat.user;
   const send = () => {
     const content = draft.trim();
     if (!content) return;
     onSendMessage(chat.id, content);
     setDraft('');
   };
+
+  useEffect(() => {
+    onMarkChatRead(chat.id, activeUserId);
+  }, [activeUserId, chat.id, onMarkChatRead]);
 
   return (
     <div className="flex flex-col h-full bg-white">

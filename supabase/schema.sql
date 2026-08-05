@@ -29,3 +29,7 @@ for each row execute function public.set_updated_at();
 
 -- 浏览器不会直接访问此表；Vercel 的服务端使用 service_role 保存数据。
 alter table public.document_derivations enable row level security;
+
+-- New Supabase Secret keys are mapped to service_role for server-side calls.
+-- It bypasses RLS, but still needs table-level privileges.
+grant select, insert, update on table public.document_derivations to service_role;

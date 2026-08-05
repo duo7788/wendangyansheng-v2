@@ -58,7 +58,8 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: process.env.KIMI_MODEL || 'kimi-k2.5',
-        temperature: 0.3,
+        // kimi-k2.6 currently only accepts the default temperature of 1.
+        temperature: 1,
         messages: [
           { role: 'system', content: '你是严谨的企业文档协作助手。' },
           { role: 'user', content: prompt },

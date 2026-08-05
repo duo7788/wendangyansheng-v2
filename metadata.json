@@ -1,0 +1,6 @@
+{
+  "name": "Oasis Enterprise UI",
+  "description": "A premium B-side office software layout featuring elegant interactions, multi-pane navigation, and a sophisticated minimalist style.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

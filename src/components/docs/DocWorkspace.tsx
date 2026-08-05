@@ -38,6 +38,13 @@ const getSourceDocumentContent = () => `本文档作为项目的唯一事实来�
 - 跨 React 和 Figma 的组件库一致性。
 - 针对所有界面颜色的 WCAG AA 无障碍标准合规性审计。`;
 
+// AI needs the document's meaning, not its editor markup or embedded image
+// data. Removing those keeps requests below Vercel's serverless body limit.
+const toAiText = (content: string, maxLength = 30000) => {
+  const plainText = new DOMParser().parseFromString(content, 'text/html').body.textContent || content;
+  return plainText.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+};
+
 interface DocWorkspaceProps {
   doc: DocItem;
   libraryName?: string;
@@ -284,18 +291,24 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       const relatedDocuments = allDocs.filter(item => relatedDocIds.includes(item.id)).map(item => ({
         id: item.id,
         title: item.title,
-        content: item.content || '',
+        content: toAiText(item.content || ''),
       }));
       const response = await fetch('/api/generate-derivation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceDocument: { id: doc.id, title: doc.title, content: doc.content || getSourceDocumentContent() },
+          sourceDocument: { id: doc.id, title: doc.title, content: toAiText(doc.content || getSourceDocumentContent()) },
           role: { id: role.id, name: role.name },
           relatedDocuments,
         }),
       });
-      const data = await response.json();
+      const responseText = await response.text();
+      let data: { derivation?: { content: string; related_document_ids?: string[]; updated_at: string }; error?: string };
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(`生成请求失败（${response.status}）：${responseText.slice(0, 140) || '服务器未返回详情'}`);
+      }
       if (!response.ok) throw new Error(data.error || '生成失败');
       setGeneratedDerivations(prev => ({
         ...prev,

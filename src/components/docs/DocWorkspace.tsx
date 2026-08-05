@@ -1,5 +1,5 @@
 import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, Loader2, PanelLeftOpen, Plus, Eye, MessageCircle, AtSign } from 'lucide-react';
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DocItem, DocLibrary, ChatItem, DocComment } from '../../types';
 import { formatPlainTextAsDocument } from './DocEmptyState';
@@ -43,6 +43,42 @@ const getSourceDocumentContent = () => `本文档作为项目的唯一事实来�
 const toAiText = (content: string, maxLength = 30000) => {
   const plainText = new DOMParser().parseFromString(content, 'text/html').body.textContent || content;
   return plainText.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+};
+
+const renderInlineMarkdown = (text: string, keyPrefix: string): ReactNode[] => {
+  const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+  return tokens.map((token, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (token.startsWith('**') && token.endsWith('**')) return <strong key={key} className="font-semibold text-zinc-900">{token.slice(2, -2)}</strong>;
+    if (token.startsWith('`') && token.endsWith('`')) return <code key={key} className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[0.9em] text-zinc-800">{token.slice(1, -1)}</code>;
+    return <span key={key}>{token}</span>;
+  });
+};
+
+const renderMarkdownLines = (lines: string[], keyPrefix: string) => lines.map((line, index) => {
+  const key = `${keyPrefix}-${index}`;
+  if (!line.trim()) return <div key={key} className="h-3" />;
+  const heading = line.match(/^(#{1,3})\s+(.+)$/);
+  if (heading) {
+    const level = heading[1].length;
+    const className = level === 1 ? 'mt-2 text-2xl font-bold tracking-tight text-zinc-900' : level === 2 ? 'mt-9 text-xl font-semibold text-zinc-900' : 'mt-6 text-base font-semibold text-zinc-900';
+    return <h2 key={key} className={className}>{renderInlineMarkdown(heading[2], key)}</h2>;
+  }
+  const task = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
+  if (task) return <div key={key} className="flex gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm"><span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${task[1].toLowerCase() === 'x' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-zinc-300'}`}>{task[1].toLowerCase() === 'x' ? <Check size={12} /> : null}</span><span>{renderInlineMarkdown(task[2], key)}</span></div>;
+  const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+  if (ordered) return <div key={key} className="flex gap-3 pl-1"><span className="font-medium text-zinc-400">{line.match(/^\s*(\d+)/)?.[1]}.</span><span>{renderInlineMarkdown(ordered[1], key)}</span></div>;
+  const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+  if (bullet) return <div key={key} className="flex gap-3 pl-1"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" /><span>{renderInlineMarkdown(bullet[1], key)}</span></div>;
+  return <p key={key}>{renderInlineMarkdown(line, key)}</p>;
+});
+
+const RenderedDerivation = ({ content }: { content: string }) => {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const evidenceIndex = lines.findIndex(line => /^#{1,3}\s*原文依据\s*$/.test(line.trim()));
+  const mainLines = evidenceIndex === -1 ? lines : lines.slice(0, evidenceIndex);
+  const evidenceLines = evidenceIndex === -1 ? [] : lines.slice(evidenceIndex + 1);
+  return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(mainLines, 'main')}{evidenceLines.length > 0 && <details className="mt-10 rounded-xl border border-zinc-200 bg-white px-5 py-4 text-zinc-600 shadow-sm"><summary className="cursor-pointer select-none text-sm font-semibold text-zinc-700 marker:text-indigo-500">查看原文依据</summary><div className="mt-4 border-t border-zinc-100 pt-3">{renderMarkdownLines(evidenceLines, 'evidence')}</div></details>}</article>;
 };
 
 interface DocWorkspaceProps {
@@ -647,9 +683,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               </h1>
               
               {generatedDerivations[viewingDerivativeRole] ? (
-                <article className="space-y-3 whitespace-pre-wrap text-sm leading-7 text-zinc-700">
-                  {generatedDerivations[viewingDerivativeRole].content}
-                </article>
+                <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} />
               ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed">
                 <p>

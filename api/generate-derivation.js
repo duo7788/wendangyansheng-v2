@@ -15,6 +15,25 @@ function json(res, status, body) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8').send(JSON.stringify(body));
 }
 
+// Kimi uses SSE when stream=true. We keep the upstream connection active while
+// collecting the final text, then preserve this API's existing JSON response.
+function contentFromStream(payload) {
+  let content = '';
+  for (const line of payload.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+    try {
+      const chunk = JSON.parse(data);
+      content += chunk.choices?.[0]?.delta?.content || '';
+    } catch {
+      // Ignore malformed non-content SSE messages. The final content check
+      // below still makes a failed stream visible to the caller.
+    }
+  }
+  return content;
+}
+
 async function saveDerivation(record) {
   const url = required(process.env.SUPABASE_URL, 'SUPABASE_URL');
   const key = required(process.env.SUPABASE_SERVICE_ROLE_KEY, 'SUPABASE_SERVICE_ROLE_KEY');
@@ -66,6 +85,11 @@ export default async function handler(req, res) {
         model: process.env.KIMI_MODEL || 'kimi-k2.5',
         // kimi-k2.6 currently only accepts the default temperature of 1.
         temperature: 1,
+        // Role views are grounded transformations, not long-horizon reasoning
+        // tasks. Disabling K2.5 thinking avoids spending minutes on hidden
+        // reasoning before returning the first visible content.
+        thinking: { type: 'disabled' },
+        stream: true,
         messages: [
           { role: 'system', content: '你是严谨的企业文档协作助手。' },
           { role: 'user', content: prompt },
@@ -73,8 +97,7 @@ export default async function handler(req, res) {
       }),
     });
     if (!kimiResponse.ok) throw new Error(`Kimi 调用失败：${await kimiResponse.text()}`);
-    const kimiData = await kimiResponse.json();
-    const content = kimiData.choices?.[0]?.message?.content;
+    const content = contentFromStream(await kimiResponse.text());
     if (!content) throw new Error('Kimi 没有返回可用内容');
 
     const saved = await saveDerivation({

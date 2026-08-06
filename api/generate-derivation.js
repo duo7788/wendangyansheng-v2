@@ -75,6 +75,12 @@ export default async function handler(req, res) {
       : `原始文档：\n${sourceDocument.content}\n\n关联资料：\n${relatedContext}`;
     const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:原文中连续出现的精确短句]]。\n- cite 内只能复制上方“依据”中连续出现的 12–60 个字符，不能概括、改写或编造；不要在 cite 外展示原文摘录。\n- 无法在原文中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
 
+    const model = process.env.KIMI_MODEL || 'kimi-k2.5';
+    // The production Kimi endpoint currently requires temperature 0.6 for
+    // kimi-k2.6 as well as the older/turbo K2 variants. Keep an explicit
+    // environment override for future model-specific changes.
+    const supportsThinkingControl = /^kimi-k2\.(5|6)(?:-|$)/.test(model);
+    const temperature = Number(process.env.KIMI_TEMPERATURE || 0.6);
     const kimiResponse = await fetch(process.env.KIMI_API_URL || KIMI_API_URL, {
       method: 'POST',
       headers: {
@@ -82,13 +88,12 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: process.env.KIMI_MODEL || 'kimi-k2.5',
-        // kimi-k2.6 currently only accepts the default temperature of 1.
-        temperature: 1,
+        model,
+        temperature,
         // Role views are grounded transformations, not long-horizon reasoning
         // tasks. Disabling K2.5 thinking avoids spending minutes on hidden
         // reasoning before returning the first visible content.
-        thinking: { type: 'disabled' },
+        ...(supportsThinkingControl ? { thinking: { type: 'disabled' } } : {}),
         stream: true,
         messages: [
           { role: 'system', content: '你是严谨的企业文档协作助手。' },
@@ -107,7 +112,7 @@ export default async function handler(req, res) {
       role_name: role.name,
       related_document_ids: relatedDocuments.map((doc) => doc.id),
       content,
-      model: process.env.KIMI_MODEL || 'kimi-k2.5',
+      model,
     });
     return json(res, 200, { derivation: saved });
   } catch (error) {

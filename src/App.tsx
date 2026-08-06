@@ -3,7 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { Directory } from './components/Directory';
 import { Workspace } from './components/Workspace';
 import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot } from './types';
-import { mockChats as initialMockChats, mockComments, mockLibraries as initialMockLibraries } from './data';
+import { mockChats as initialMockChats, mockLibraries as initialMockLibraries } from './data';
 
 export const USERS = [
   { id: 'u_jobs', name: '乔布斯 (产品)', status: 'online', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80' },
@@ -32,7 +32,9 @@ export default function App() {
   const [appliedDerivations, setAppliedDerivations] = useState<Record<string, Set<string>>>({});
   const [generatedDerivations, setGeneratedDerivations] = useState<Record<string, Set<string>>>({});
   const [derivationSnapshots, setDerivationSnapshots] = useState<DerivationSnapshot[]>([]);
-  const [comments, setComments] = useState<DocComment[]>(mockComments);
+  // Comments are real user-created workspace state.  Do not pre-seed them:
+  // a newly opened mock document should look unused.
+  const [comments, setComments] = useState<DocComment[]>([]);
 
   const handleShareDoc = (chatId: string, doc: DocItem) => {
     const recipientId = chats.find(chat => chat.id === chatId)?.user.id;

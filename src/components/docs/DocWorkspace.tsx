@@ -253,26 +253,6 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     if (comments.length > 0) setIsCommentPanelOpen(true);
   }, [doc.id, comments.length]);
 
-  // Restore previously generated content after a refresh or when a document is reopened.
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/derivations?sourceDocumentId=${encodeURIComponent(doc.id)}`)
-      .then(response => response.ok ? response.json() : Promise.reject(new Error('无法读取已保存的衍生文档')))
-      .then(data => {
-        if (cancelled) return;
-        const restored = (data.derivations || []).reduce((result: Record<string, GeneratedDerivation>, item: { role_id: string; content: string; related_document_ids: string[]; source_content_hash?: string | null; updated_at: string }) => {
-          result[item.role_id] = { content: item.content, relatedDocumentIds: item.related_document_ids || [], sourceContentHash: item.source_content_hash, generatedAt: item.updated_at };
-          return result;
-        }, {});
-        setGeneratedDerivations(restored);
-        Object.keys(restored).forEach(roleId => onGeneratedDerivation(doc.id, roleId));
-        setActiveDerivativeRoles(previous => Array.from(new Set([...previous, ...Object.keys(restored)])));
-      })
-      // The endpoint is unavailable in plain `vite` development. Vercel deploys it.
-      .catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [doc.id]);
-
   // The model receives plain text, so this same normalised value is the
   // version identity for both generation and later change detection.
   const sourceTextForAi = toAiText(`${doc.title}\n${doc.content || getSourceDocumentContent()}`);
@@ -291,22 +271,6 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     void hashSourceText(sourceTextForAi).then(hash => {
       if (!cancelled) initialSourceHashRef.current = hash;
     });
-    return () => { cancelled = true; };
-  }, [doc.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/derivation-updates?sourceDocumentId=${encodeURIComponent(doc.id)}`)
-      .then(response => response.ok ? response.json() : Promise.reject(new Error('无法读取更新状态')))
-      .then(data => {
-        if (cancelled) return;
-        setDerivationUpdates((data.updates || []).map((item: { role_id: string; target_source_content_hash: string; status: string }) => ({
-          roleId: item.role_id,
-          targetSourceContentHash: item.target_source_content_hash,
-          status: item.status,
-        })));
-      })
-      .catch(() => undefined);
     return () => { cancelled = true; };
   }, [doc.id]);
 

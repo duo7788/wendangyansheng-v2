@@ -63,4 +63,18 @@ export interface DocComment {
   recipientId?: string;
   replyToId?: string;
   readByRecipient?: boolean;
+  status?: 'open' | 'resolved';
+  resolvedById?: string;
+  replies?: Array<{ id: string; authorId: string; content: string; createdAt: string }>;
+}
+
+/** A lightweight audit entry created when a role document is regenerated.
+ * It intentionally stores no source-document copy. */
+export interface DerivationSnapshot {
+  id: string;
+  docId: string;
+  roleId: string;
+  roleName: string;
+  sourceContentHash: string;
+  createdAt: string;
 }

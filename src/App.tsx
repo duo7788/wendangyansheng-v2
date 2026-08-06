@@ -2,8 +2,8 @@ import { useCallback, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Directory } from './components/Directory';
 import { Workspace } from './components/Workspace';
-import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment } from './types';
-import { mockChats as initialMockChats, mockLibraries as initialMockLibraries } from './data';
+import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot } from './types';
+import { mockChats as initialMockChats, mockComments, mockLibraries as initialMockLibraries } from './data';
 
 export const USERS = [
   { id: 'u_jobs', name: '乔布斯 (产品)', status: 'online', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80' },
@@ -31,7 +31,8 @@ export default function App() {
   const [activeUserId, setActiveUserId] = useState<string>('u_jobs');
   const [appliedDerivations, setAppliedDerivations] = useState<Record<string, Set<string>>>({});
   const [generatedDerivations, setGeneratedDerivations] = useState<Record<string, Set<string>>>({});
-  const [comments, setComments] = useState<DocComment[]>([]);
+  const [derivationSnapshots, setDerivationSnapshots] = useState<DerivationSnapshot[]>([]);
+  const [comments, setComments] = useState<DocComment[]>(mockComments);
 
   const handleShareDoc = (chatId: string, doc: DocItem) => {
     const recipientId = chats.find(chat => chat.id === chatId)?.user.id;
@@ -122,16 +123,31 @@ export default function App() {
     });
   }, []);
 
+  const handleRecordDerivationSnapshot = useCallback((snapshot: Omit<DerivationSnapshot, 'id' | 'createdAt'>) => {
+    setDerivationSnapshots(previous => [...previous, {
+      ...snapshot,
+      id: `snapshot_${Date.now()}_${snapshot.roleId}`,
+      createdAt: new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    }]);
+  }, []);
+
   const handleAddComment = (comment: Omit<DocComment, 'id' | 'createdAt'>) => {
     const createdAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const isOwnerReply = comment.authorId === 'u_jobs' && Boolean(comment.recipientId);
-    setComments(prev => [...prev, {
-      ...comment,
-      id: `comment_${Date.now()}`,
-      createdAt,
-      readByOwner: isOwnerReply,
-      readByRecipient: isOwnerReply ? false : undefined,
-    }]);
+    const isOwnerReply = comment.authorId === 'u_jobs' && Boolean(comment.replyToId);
+    if (comment.replyToId) {
+      setComments(prev => prev.map(thread => thread.id !== comment.replyToId ? thread : {
+        ...thread,
+        replies: [...(thread.replies || []), { id: `reply_${Date.now()}`, authorId: comment.authorId, content: comment.content, createdAt }],
+      }));
+    } else {
+      setComments(prev => [...prev, {
+        ...comment,
+        id: `comment_${Date.now()}`,
+        createdAt,
+        readByOwner: isOwnerReply,
+        readByRecipient: isOwnerReply ? false : undefined,
+      }]);
+    }
     const docTitle = libraries.flatMap(library => library.docs).find(doc => doc.id === comment.docId)?.title || '文档';
     const counterpartId = isOwnerReply ? comment.recipientId : comment.authorId;
     setChats(prev => prev.map(chat => chat.user.id === counterpartId ? {
@@ -150,8 +166,24 @@ export default function App() {
     }));
   };
 
+  const handleReplyToComment = (commentId: string, content: string) => {
+    const value = content.trim();
+    if (!value) return;
+    setComments(previous => previous.map(comment => comment.id !== commentId ? comment : {
+      ...comment,
+      replies: [...(comment.replies || []), { id: `reply_${Date.now()}`, authorId: activeUserId, content: value, createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }],
+    }));
+  };
+
+  const handleResolveComment = (commentId: string) => setComments(previous => previous.map(comment => comment.id === commentId ? { ...comment, status: 'resolved', resolvedById: activeUserId } : comment));
+  const handleDeleteCommentRecord = (commentId: string) => setComments(previous => previous.filter(comment => comment.id !== commentId));
+
   const currentUserRole = USER_ROLE_BY_ID[activeUserId];
-  const selectedDocId = activeItemId?.split('|')[0];
+  // Both the document library (`d1|backend`) and a review route
+  // (`review:d1:u1`) ultimately point to the same source document.
+  const selectedDocId = activeItemId?.startsWith('review:')
+    ? activeItemId.split(':')[1]
+    : activeItemId?.split('|')[0];
   // A role view is intentionally not exposed merely because it exists. The
   // matching member must have received a document link in their own thread.
   const hasReceivedDocumentLink = Boolean(selectedDocId && chats.some(chat =>
@@ -224,9 +256,14 @@ export default function App() {
         appliedRoleIds={selectedDocId ? appliedDerivations[selectedDocId] || new Set<string>() : new Set<string>()}
         onApplyDerivation={handleApplyDerivation}
         onGeneratedDerivation={handleGeneratedDerivation}
+        derivationSnapshots={derivationSnapshots}
+        onRecordDerivationSnapshot={handleRecordDerivationSnapshot}
         comments={comments}
         onAddComment={handleAddComment}
         onMarkCommentsRead={handleMarkCommentsRead}
+        onReplyToComment={handleReplyToComment}
+        onResolveComment={handleResolveComment}
+        onDeleteCommentRecord={handleDeleteCommentRecord}
         isDirCollapsed={isDirCollapsed}
         setIsDirCollapsed={setIsDirCollapsed}
         setActiveApp={setActiveApp}

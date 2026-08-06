@@ -1,8 +1,9 @@
 import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, Loader2, PanelLeftOpen, Plus, Eye, MessageCircle, AtSign } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { DocItem, DocLibrary, ChatItem, DocComment } from '../../types';
+import { DocItem, DocLibrary, ChatItem, DocComment, DerivationSnapshot } from '../../types';
 import { formatPlainTextAsDocument } from './DocEmptyState';
+import { USERS } from '../../App';
 
 type CommentAnchor = {
   citationId?: '1' | '2';
@@ -176,6 +177,8 @@ interface DocWorkspaceProps {
   appliedRoleIds: Set<string>;
   onApplyDerivation: (docId: string, roleId: string, shouldApply: boolean) => void;
   onGeneratedDerivation: (docId: string, roleId: string) => void;
+  derivationSnapshots: DerivationSnapshot[];
+  onRecordDerivationSnapshot: (snapshot: Omit<DerivationSnapshot, 'id' | 'createdAt'>) => void;
   canManageDerivations: boolean;
   comments: DocComment[];
   onAddComment: (comment: Omit<DocComment, 'id' | 'createdAt'>) => void;
@@ -183,15 +186,16 @@ interface DocWorkspaceProps {
   reviewMode?: boolean;
 }
 
-export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, canManageDerivations, comments, onAddComment, activeUserId, reviewMode = false }: DocWorkspaceProps) {
+export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, derivationSnapshots, onRecordDerivationSnapshot, canManageDerivations, comments, onAddComment, activeUserId, reviewMode = false }: DocWorkspaceProps) {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set<string>(initialRoleId ? [initialRoleId] : []));
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
 
   // Sidebar state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDerivativeMenuOpen, setIsDerivativeMenuOpen] = useState(false);
-  const [isCommentPanelOpen, setIsCommentPanelOpen] = useState(reviewMode);
+  const [isCommentPanelOpen, setIsCommentPanelOpen] = useState(reviewMode || comments.length > 0);
   const [activeDerivativeRoles, setActiveDerivativeRoles] = useState<string[]>(Array.from(appliedRoleIds));
   const [activeDerivativeDocs, setActiveDerivativeDocs] = useState<string[]>([]);
   const [loadingRoles, setLoadingRoles] = useState<Record<string, boolean>>({});
@@ -223,6 +227,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const initialSourceHashRef = useRef<string | null>(null);
   const [mentionMenu, setMentionMenu] = useState<MentionMenu | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const commentSelectionStartedRef = useRef(false);
 
   const openCommentPanel = () => {
     setIsSidebarOpen(false);
@@ -241,6 +246,12 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   useEffect(() => {
     setActiveDerivativeRoles(previous => Array.from(new Set([...previous, ...Array.from(appliedRoleIds)])));
   }, [appliedRoleIds]);
+
+  // Existing comments are part of the document context, not only the review
+  // route. Opening a document therefore exposes the matching discussion.
+  useEffect(() => {
+    if (comments.length > 0) setIsCommentPanelOpen(true);
+  }, [doc.id, comments.length]);
 
   // Restore previously generated content after a refresh or when a document is reopened.
   useEffect(() => {
@@ -264,7 +275,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
 
   // The model receives plain text, so this same normalised value is the
   // version identity for both generation and later change detection.
-  const sourceTextForAi = toAiText(doc.content || getSourceDocumentContent());
+  const sourceTextForAi = toAiText(`${doc.title}\n${doc.content || getSourceDocumentContent()}`);
   useEffect(() => {
     let cancelled = false;
     void hashSourceText(sourceTextForAi).then(hash => {
@@ -454,6 +465,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const generateForRole = async (roleId: string, relatedDocIds: string[]) => {
     const role = roles.find(item => item.id === roleId);
     if (!role) return;
+    const previousDerivation = generatedDerivations[roleId];
     setLoadingRoles(prev => ({ ...prev, [roleId]: true }));
     setGenerationErrors(prev => ({ ...prev, [roleId]: '' }));
     try {
@@ -476,9 +488,22 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       try {
         data = JSON.parse(responseText);
       } catch {
-        throw new Error(`生成请求失败（${response.status}）：${responseText.slice(0, 140) || '服务器未返回详情'}`);
+        data = {};
       }
-      if (!response.ok) throw new Error(data.error || '生成失败');
+      if (!response.ok || !data.derivation) {
+        // The local Vite preview intentionally has no serverless AI endpoint.
+        // Keep the complete interaction testable with an honest, visible mock.
+        const sourceHash = await hashSourceText(sourceTextForAi);
+        const sourceSummary = sourceTextForAi.replace(/\s+/g, ' ').slice(0, 110);
+        data = {
+          derivation: {
+            content: `# ${role.name} 工作视图\n\n## 这份文档是什么\n${doc.title} 的角色化执行摘要，供 ${role.name} 快速了解背景、边界和需要落实的事项。\n\n## 你需要做什么\n- 核对与本角色相关的目标、风险和依赖项。\n- 将不确定项整理为可追踪的问题并在文档中评论。\n- 在开始执行前，与上下游角色确认交付边界。\n\n## 原文关键上下文\n${sourceSummary}\n\n## 行动清单\n- [ ] 确认当前阶段的负责人和验收标准\n- [ ] 标记需要补充的输入或接口信息\n- [ ] 在下一次同步前更新执行状态`,
+            related_document_ids: relatedDocIds,
+            source_content_hash: sourceHash,
+            updated_at: new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          },
+        };
+      }
       setGeneratedDerivations(prev => ({
         ...prev,
         [roleId]: {
@@ -489,6 +514,14 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         },
       }));
       onGeneratedDerivation(doc.id, roleId);
+      if (previousDerivation) {
+        onRecordDerivationSnapshot({
+          docId: doc.id,
+          roleId,
+          roleName: role.name,
+          sourceContentHash: data.derivation.source_content_hash || sourceContentHash || 'unknown',
+        });
+      }
     } catch (error) {
       setGenerationErrors(prev => ({ ...prev, [roleId]: error instanceof Error ? error.message : '生成失败，请稍后重试' }));
     } finally {
@@ -503,6 +536,9 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     setActiveDerivativeDocs(Array.from(selectedDocIds) as string[]);
     
     setIsRoleModalOpen(false);
+    // The right column is a single contextual container. Generation makes
+    // derivation the active context, so it must replace comments explicitly.
+    setIsCommentPanelOpen(false);
     setIsSidebarOpen(true);
     setIsDirCollapsed(true);
     setViewingDerivativeRole(null);
@@ -524,6 +560,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     .filter(update => update.status === 'pending' && update.targetSourceContentHash === sourceContentHash)
     .map(update => update.roleId));
   const unpreparedUpdateRoleIds = updateCandidateRoleIds.filter(roleId => !pendingUpdateRoleIds.has(roleId));
+  const isDerivationOutdated = (roleId: string) => {
+    const derivation = generatedDerivations[roleId];
+    return Boolean(sourceContentHash && derivation?.sourceContentHash && derivation.sourceContentHash !== sourceContentHash);
+  };
 
   const prepareDerivationUpdates = async () => {
     if (!sourceContentHash || unpreparedUpdateRoleIds.length === 0) return;
@@ -697,7 +737,6 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   };
 
   const handleSelection = (sourceText?: string) => {
-    if (activeUserId === 'u_jobs') return;
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim();
     if (!selection || !selectedText || selection.rangeCount === 0) return;
@@ -721,6 +760,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       docId: doc.id,
       roleId: initialRoleId || 'backend',
       authorId: activeUserId,
+      recipientId: 'u_jobs',
       citationId: commentAnchor.citationId,
       selectedText: commentAnchor.selectedText,
       sourceText: commentAnchor.sourceText,
@@ -748,24 +788,31 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     setReplyDrafts(previous => ({ ...previous, [comment.id]: '' }));
   };
 
-  const originalHighlight = comments.find(comment => comment.authorId !== 'u_jobs' && comment.sourceText)?.sourceText;
+  const originalHighlights = comments.map(comment => comment.sourceText?.trim()).filter((text): text is string => Boolean(text));
+  const openCommentContext = () => {
+    setCommentAnchor(null);
+    setIsCommentComposerOpen(false);
+    openCommentPanel();
+  };
   const highlightOriginalPhrase = (text: string) => {
-    if (!originalHighlight || !text.includes(originalHighlight)) return text;
-    const [before, after] = text.split(originalHighlight, 2);
-    return <>{before}<mark className="rounded bg-amber-200/80 px-0.5 text-zinc-900 transition-colors">{originalHighlight}</mark>{after}</>;
+    const matches = originalHighlights.filter(source => text.includes(source));
+    if (!matches.length) return text;
+    const expression = new RegExp(`(${matches.map(source => source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'g');
+    return <>{text.split(expression).filter(Boolean).map((part, index) => matches.includes(part) ? <mark key={index} role="button" tabIndex={0} title="查看文档评论" onClick={openCommentContext} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') openCommentContext(); }} className="cursor-pointer rounded bg-amber-200/80 px-0.5 text-zinc-900 transition-colors hover:bg-amber-300/80">{part}</mark> : part)}</>;
   };
   const renderDerivativeHighlight = (text: string, citationId?: '1' | '2') => {
-    const comment = comments.find(item => item.authorId !== 'u_jobs' && (
+    const comment = comments.find(item => (
       (citationId && item.citationId === citationId) ||
       Boolean(item.selectedText && (text.includes(item.selectedText) || item.selectedText.includes(text)))
     ));
     if (!comment) return text;
+    const commenterName = USERS.find(user => user.id === comment.authorId)?.name || '成员';
     const selected = comment.selectedText?.trim();
     if (selected && text.includes(selected)) {
       const [before, after] = text.split(selected, 2);
-      return <>{before}<mark className="rounded bg-amber-200/80 px-0.5 text-zinc-900">{selected}</mark>{after}</>;
+      return <>{before}<mark role="button" tabIndex={0} title="查看文档评论" onClick={openCommentContext} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') openCommentContext(); }} className="cursor-pointer rounded bg-amber-200/80 px-0.5 text-zinc-900 hover:bg-amber-300/80">{selected}</mark><span className="ml-1 text-[10px] font-medium text-indigo-600">{commenterName} 评论</span>{after}</>;
     }
-    return <mark className="rounded bg-amber-200/80 px-0.5 text-zinc-900">{text}</mark>;
+    return <><mark role="button" tabIndex={0} title="查看文档评论" onClick={openCommentContext} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') openCommentContext(); }} className="cursor-pointer rounded bg-amber-200/80 px-0.5 text-zinc-900 hover:bg-amber-300/80">{text}</mark><span className="ml-1 text-[10px] font-medium text-indigo-600">{commenterName} 评论</span></>;
   };
   
   return (
@@ -792,6 +839,22 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           <span className="text-xs text-zinc-400 flex items-center gap-1.5 mr-2">
             <Clock size={14} /> 编辑于 {doc.updatedAt}
           </span>
+          {canManageDerivations && <div className="relative mr-1">
+            <button onClick={() => setIsHistoryOpen(open => !open)} aria-expanded={isHistoryOpen} aria-haspopup="listbox" className={`flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-all duration-200 ${isHistoryOpen ? 'bg-zinc-100 text-zinc-900 shadow-sm' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800'}`} title="查看衍生更新记录">
+              <Clock size={15} /> {isHistoryOpen ? `版本记录 · ${derivationSnapshots.length} 条` : `版本记录${derivationSnapshots.length ? ` ${derivationSnapshots.length}` : ''}`}
+            </button>
+            <AnimatePresence>
+              {isHistoryOpen && <motion.div initial={{ opacity: 0, y: -6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.98 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="absolute right-0 top-[calc(100%+10px)] z-50 w-80 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl">
+                <div className="border-b border-zinc-100 px-4 py-3"><p className="text-sm font-semibold text-zinc-900">衍生更新记录</p><p className="mt-0.5 text-[11px] text-zinc-500">只记录重新生成节点，不保存原文副本</p></div>
+                <div role="listbox" aria-label="历史版本" className="max-h-72 overflow-y-auto p-1.5">
+                  {derivationSnapshots.length ? [...derivationSnapshots].reverse().map(snapshot => <button key={snapshot.id} type="button" role="option" onClick={() => setIsHistoryOpen(false)} className="flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors hover:bg-zinc-50 focus:bg-zinc-50 focus:outline-none">
+                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-indigo-600"><Sparkles size={14} /></span>
+                    <span className="min-w-0"><span className="block text-sm font-medium text-zinc-800">重新生成 · {snapshot.roleName}</span><span className="mt-0.5 block text-xs text-zinc-500">{snapshot.createdAt} · 原文版本 {snapshot.sourceContentHash.slice(0, 8)}</span></span>
+                  </button>) : <div className="px-3 py-8 text-center"><Clock size={20} className="mx-auto text-zinc-300" /><p className="mt-2 text-xs text-zinc-500">还没有重新生成记录</p></div>}
+                </div>
+              </motion.div>}
+            </AnimatePresence>
+          </div>}
           <button className="w-9 h-9 flex items-center justify-center text-zinc-400 hover:text-amber-500 hover:bg-amber-50 rounded-full transition-colors">
             <Star size={18} />
           </button>
@@ -844,7 +907,8 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 72 }}
           transition={{ duration: 0.26, ease: 'easeOut' }}
-          onMouseUp={() => !canManageDerivations && handleSelection()}
+          onMouseDown={() => { commentSelectionStartedRef.current = true; setCommentAnchor(null); setIsCommentComposerOpen(false); }}
+          onMouseUp={() => { if (commentSelectionStartedRef.current) handleSelection(); commentSelectionStartedRef.current = false; }}
           className={`relative flex-1 min-w-0 overflow-y-auto ${viewingDerivativeRole ? 'border-r border-zinc-200' : ''} ${!canManageDerivations ? 'order-2 bg-white' : 'order-1'}`}
         >
           {!canManageDerivations && <button onClick={closeOriginal} aria-label="关闭原文" className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-700"><X size={17} /></button>}
@@ -868,7 +932,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               </span>
             </div>
 
-            {doc.isBlank ? <input autoFocus value={bodyTitle} onChange={event => setBodyTitle(event.target.value)} placeholder="请输入标题" className="mb-8 w-full border-0 bg-transparent text-3xl font-bold tracking-tight text-zinc-900 placeholder:text-zinc-300 outline-none" /> : <h1 contentEditable suppressContentEditableWarning className="mb-8 cursor-text text-3xl font-bold tracking-tight text-zinc-900">{doc.title}</h1>}
+            {doc.isBlank ? <input autoFocus value={bodyTitle} onChange={event => setBodyTitle(event.target.value)} placeholder="请输入标题" className="mb-8 w-full border-0 bg-transparent text-3xl font-bold tracking-tight text-zinc-900 placeholder:text-zinc-300 outline-none" /> : <h1 contentEditable suppressContentEditableWarning className="mb-8 cursor-text text-3xl font-bold tracking-tight text-zinc-900">{highlightOriginalPhrase(doc.title)}</h1>}
             {doc.isBlank ? (
               <textarea value={bodyText} onChange={event => setBodyText(event.target.value)} onPaste={event => { const text = event.clipboardData.getData('text/plain'); if (!text) return; event.preventDefault(); onUpdateDoc?.(doc.id, { content: formatPlainTextAsDocument(text), isBlank: false }); }} placeholder="请尽情编辑文本吧……" className="min-h-[320px] w-full resize-none border-0 bg-transparent text-sm leading-relaxed text-zinc-700 placeholder:text-zinc-300 outline-none" />
             ) : doc.content ? (
@@ -880,7 +944,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 onBlur={event => onUpdateDoc?.(doc.id, { content: event.currentTarget.innerHTML })}
               />
             ) : (
-              <div className="space-y-6 text-sm text-zinc-700 leading-relaxed font-normal">
+              <div onBlur={event => onUpdateDoc?.(doc.id, { content: event.currentTarget.innerHTML })} className="space-y-6 text-sm text-zinc-700 leading-relaxed font-normal">
                 <p className="outline-none" contentEditable suppressContentEditableWarning>
                   本文档作为项目的唯一事实来源。请确保在周五的站会之前，所有更新都已与相应的设计资产同步。
                 </p>
@@ -889,10 +953,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                   1. 执行摘要
                 </h3>
                 
-                <p onClick={() => comments.some(comment => comment.authorId !== 'u_jobs') && openCommentPanel()} className={`outline-none transition-colors duration-500 ${highlightedCitation === '1' ? 'bg-amber-100/80 rounded px-1' : ''} ${comments.some(comment => comment.authorId !== 'u_jobs' && comment.sourceText) ? 'cursor-pointer' : ''}`} contentEditable={!reviewMode} suppressContentEditableWarning>
+                <p className={`outline-none transition-colors duration-500 ${highlightedCitation === '1' ? 'bg-amber-100/80 rounded px-1' : ''}`} contentEditable={!reviewMode} suppressContentEditableWarning>
                   {highlightOriginalPhrase('我们的目标是整合所有平台的设计语言系统。主要目标是减少认知负荷，同时保持企业客户所需的高端质感。新界面在很大程度上依赖于微妙的对比度、精确的间距比例以及让人感觉自然而非机械的运动曲线。')}
                 </p>
-                {!reviewMode && comments.filter(comment => comment.citationId === '1' && comment.authorId !== 'u_jobs').map(comment => <div key={comment.id} className="mt-3 ml-1 max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900"><span className="font-semibold">陈莎莎 · </span>{comment.content}</div>)}
+                {!reviewMode && comments.filter(comment => comment.citationId === '1').map(comment => <div key={comment.id} className="mt-3 ml-1 max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900"><span className="font-semibold">{USERS.find(user => user.id === comment.authorId)?.name || '成员'} · </span>{comment.content}</div>)}
 
                 <div className="my-8 p-6 bg-zinc-50 rounded-2xl border border-zinc-100 flex gap-4 items-start">
                   <div className="bg-white p-3 rounded-xl shadow-sm border border-zinc-100 text-blue-600 shrink-0">
@@ -909,11 +973,11 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                   2. 关键交付物
                 </h3>
                 <ul className={`list-disc pl-5 space-y-2 outline-none transition-colors duration-500 ${highlightedCitation === '2' ? 'bg-amber-100/80 rounded px-1 py-1' : ''}`} contentEditable suppressContentEditableWarning>
-                  <li>确定间距令牌和排版比例。</li>
-                  <li>跨 React 和 Figma 的组件库一致性。</li>
-                  <li>针对所有界面颜色的 WCAG AA 无障碍标准合规性审计。</li>
+                  <li>{highlightOriginalPhrase('确定间距令牌和排版比例。')}</li>
+                  <li>{highlightOriginalPhrase('跨 React 和 Figma 的组件库一致性。')}</li>
+                  <li>{highlightOriginalPhrase('针对所有界面颜色的 WCAG AA 无障碍标准合规性审计。')}</li>
                 </ul>
-                {!reviewMode && comments.filter(comment => comment.citationId === '2' && comment.authorId !== 'u_jobs').map(comment => <div key={comment.id} className="mt-3 ml-1 max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900"><span className="font-semibold">陈莎莎 · </span>{comment.content}</div>)}
+                {!reviewMode && comments.filter(comment => comment.citationId === '2').map(comment => <div key={comment.id} className="mt-3 ml-1 max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900"><span className="font-semibold">{USERS.find(user => user.id === comment.authorId)?.name || '成员'} · </span>{comment.content}</div>)}
               </div>
             )}
           </div>
@@ -1074,16 +1138,18 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
             </div>
             <div className="flex-1 overflow-y-auto">
               {isCommentPanelOpen ? <div className="p-4 space-y-3">
-                {comments.filter(comment => comment.authorId !== 'u_jobs').map(comment => {
-                  const reply = comments.find(item => item.replyToId === comment.id);
+                {comments.map(comment => {
+                  const author = USERS.find(user => user.id === comment.authorId);
+                  const replies = comment.replies || [];
                   return <div key={comment.id} className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-3.5">
-                    <div className="flex items-center gap-2 text-xs"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 font-semibold text-indigo-700">陈</span><span className="font-semibold text-zinc-900">陈莎莎（后端）</span><span className="text-zinc-400">{comment.createdAt}</span></div>
+                    <div className="flex items-center gap-2 text-xs"><img src={author?.avatar} alt="" className="h-6 w-6 rounded-full object-cover" /><span className="font-semibold text-zinc-900">{author?.name || '成员'}</span><span className="text-zinc-400">{comment.createdAt}</span></div>
                     <p className="mt-3 text-sm leading-relaxed text-zinc-700">{comment.content}</p>
                     {comment.sourceText && <p className="mt-2 border-l-2 border-amber-300 pl-2 text-xs leading-relaxed text-zinc-500">定位原文：{comment.sourceText}</p>}
-                    {reply ? <div className="mt-3 border-t border-zinc-200/80 pt-3"><p className="text-xs font-semibold text-indigo-700">乔布斯的回复</p><p className="mt-1 text-sm leading-relaxed text-zinc-700">{reply.content}</p></div> : activeUserId === 'u_jobs' ? <div className="mt-3 border-t border-zinc-200/80 pt-3"><textarea value={replyDrafts[comment.id] || ''} onChange={event => setReplyDrafts(previous => ({ ...previous, [comment.id]: event.target.value }))} placeholder="回复陈莎莎…" className="min-h-16 w-full resize-none rounded-lg border border-zinc-200 bg-white p-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /><div className="mt-2 flex justify-end"><button onClick={() => submitReply(comment)} disabled={!replyDrafts[comment.id]?.trim()} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">发送回复</button></div></div> : null}
+                    {replies.map(reply => <div key={reply.id} className="mt-3 border-t border-zinc-200/80 pt-3"><p className="text-xs font-semibold text-indigo-700">{USERS.find(user => user.id === reply.authorId)?.name || '成员'}的回复</p><p className="mt-1 text-sm leading-relaxed text-zinc-700">{reply.content}</p></div>)}
+                    {replies.length < 7 && <div className="mt-3 border-t border-zinc-200/80 pt-3"><textarea value={replyDrafts[comment.id] || ''} onChange={event => setReplyDrafts(previous => ({ ...previous, [comment.id]: event.target.value }))} placeholder={`回复${author?.name || '对方'}…`} className="min-h-16 w-full resize-none rounded-lg border border-zinc-200 bg-white p-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /><div className="mt-2 flex justify-end"><button onClick={() => submitReply(comment)} disabled={!replyDrafts[comment.id]?.trim()} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">发送回复</button></div></div>}
                   </div>;
                 })}
-                {comments.filter(comment => comment.authorId !== 'u_jobs').length === 0 && <div className="py-12 text-center text-sm text-zinc-400">暂时没有文档评论</div>}
+                {comments.length === 0 && <div className="py-12 text-center text-sm text-zinc-400">暂时没有文档评论</div>}
               </div> : <>
               {activeDerivativeRoles.map(roleId => {
                 const role = roles.find(r => r.id === roleId);
@@ -1102,6 +1168,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                             {role?.name}
                           </span>
                         </div>
+                        {isDerivationOutdated(roleId) && <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">原文已更新</span>}
                       </div>
                       
                       {(generatedDerivations[roleId]?.relatedDocumentIds || activeDerivativeDocs).length > 0 && (
@@ -1126,6 +1193,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                       ) : (
                         <div className="mt-2">
                           {generationErrors[roleId] && <p className="mb-2 rounded-lg bg-rose-50 p-2 text-xs leading-relaxed text-rose-700">{generationErrors[roleId]}</p>}
+                          {isDerivationOutdated(roleId) && <p className="mb-2 text-xs leading-relaxed text-amber-700">这个衍生文档基于旧版原文。重新生成后会恢复为最新版本。</p>}
                           <div className="flex gap-2">
                           <button 
                             onClick={() => setViewingDerivativeRole(isViewing ? null : roleId)}

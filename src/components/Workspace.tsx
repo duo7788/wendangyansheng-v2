@@ -1,9 +1,10 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment } from '../types';
+import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot } from '../types';
 import { ChatWorkspace } from './chat/ChatWorkspace';
 import { DocWorkspace } from './docs/DocWorkspace';
 import { DocEmptyState } from './docs/DocEmptyState';
 import { Inbox, PanelLeftOpen } from 'lucide-react';
+import { TaskWorkspace } from './tasks/TaskWorkspace';
 
 interface WorkspaceProps {
   activeApp: AppIdentifier;
@@ -20,23 +21,31 @@ interface WorkspaceProps {
   appliedRoleIds: Set<string>;
   onApplyDerivation: (docId: string, roleId: string, shouldApply: boolean) => void;
   onGeneratedDerivation: (docId: string, roleId: string) => void;
+  derivationSnapshots: DerivationSnapshot[];
+  onRecordDerivationSnapshot: (snapshot: Omit<DerivationSnapshot, 'id' | 'createdAt'>) => void;
   comments: DocComment[];
   onAddComment: (comment: Omit<DocComment, 'id' | 'createdAt'>) => void;
   onMarkCommentsRead: (docId: string, viewerId: string) => void;
+  onReplyToComment: (commentId: string, content: string) => void;
+  onResolveComment: (commentId: string) => void;
+  onDeleteCommentRecord: (commentId: string) => void;
   isDirCollapsed: boolean;
   setIsDirCollapsed: (collapsed: boolean) => void;
   setActiveApp: (app: AppIdentifier) => void;
   setActiveItemId: (id: string | null) => void;
 }
 
-export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onUpdateDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, comments, onAddComment, onMarkCommentsRead, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
+export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onUpdateDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, derivationSnapshots, onRecordDerivationSnapshot, comments, onAddComment, onMarkCommentsRead, onReplyToComment, onResolveComment, onDeleteCommentRecord, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
   
   const renderContent = () => {
+    if (activeApp === 'tasks') return <TaskWorkspace comments={comments} libraries={libraries} activeUserId={activeUserId} onReply={onReplyToComment} onResolve={onResolveComment} onDelete={onDeleteCommentRecord} />;
     const reviewMatch = activeItemId?.match(/^review:([^:]+):([^:]+)$/);
     if (activeApp === 'messages' && reviewMatch) {
       const doc = libraries.flatMap(library => library.docs).find(item => item.id === reviewMatch[1]);
       const reviewerRole = reviewMatch[2] === 'u1' ? 'backend' : undefined;
-      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={reviewerRole} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id && (comment.authorId === reviewMatch[2] || comment.recipientId === reviewMatch[2]))} onAddComment={onAddComment} activeUserId={activeUserId} reviewMode />;
+      // A comment is document state.  Review, chat and document-library entry
+      // points must therefore pass the exact same document-wide thread set.
+      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={reviewerRole} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} derivationSnapshots={derivationSnapshots.filter(snapshot => snapshot.docId === doc.id)} onRecordDerivationSnapshot={onRecordDerivationSnapshot} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} activeUserId={activeUserId} reviewMode />;
     }
     if (!activeItemId) {
       if (activeApp === 'docs') {
@@ -72,7 +81,7 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
       const [actualDocId, roleId] = activeItemId.split('|');
       const doc = allDocs.find(d => d.id === actualDocId);
       const library = libraries.find(item => item.docs.some(item => item.id === actualDocId));
-      if (doc) return <DocWorkspace doc={doc} libraryName={library?.name} onUpdateDoc={onUpdateDoc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={initialDerivativeRole || roleId} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} activeUserId={activeUserId} />;
+      if (doc) return <DocWorkspace doc={doc} libraryName={library?.name} onUpdateDoc={onUpdateDoc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={initialDerivativeRole || roleId} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} derivationSnapshots={derivationSnapshots.filter(snapshot => snapshot.docId === doc.id)} onRecordDerivationSnapshot={onRecordDerivationSnapshot} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} activeUserId={activeUserId} />;
     }
 
     return (

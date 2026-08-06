@@ -51,11 +51,24 @@ const toAiText = (content: string, maxLength = 30000) => {
 
 type InlineCitation = { id: number; quote: string };
 
+// Generated citations occasionally differ only in line breaks, non-breaking
+// spaces, full-width punctuation, or curly quotes. Normalising those cosmetic
+// differences keeps source lookup strict in meaning while much more reliable.
+const normalizeCitationText = (value: string) => value
+  .normalize('NFKC')
+  .replace(/[\s\u00a0]+/g, '')
+  .replace(/[“”]/g, '"')
+  .replace(/[‘’]/g, "'");
+
 const citationContext = (source: string, quote: string) => {
   const normalizedSource = source.replace(/\s+/g, ' ').trim();
   const normalizedQuote = quote.replace(/\s+/g, ' ').trim();
   const index = normalizedSource.indexOf(normalizedQuote);
-  if (index < 0) return { before: '', focus: normalizedQuote, after: '' };
+  if (index < 0) {
+    // The full source still validates the citation, even when typography makes
+    // a character-for-character context preview impossible.
+    return { before: '', focus: quote, after: '' };
+  }
   return {
     before: normalizedSource.slice(Math.max(0, index - 54), index),
     focus: normalizedQuote,
@@ -78,23 +91,56 @@ const renderInlineMarkdown = (text: string, keyPrefix: string, onCitationClick?:
   });
 };
 
-const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '') => lines.map((line, index) => {
-  const key = `${keyPrefix}-${index}`;
-  if (!line.trim()) return <div key={key} className="h-3" />;
+const isTableSeparator = (line: string) => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+const splitTableRow = (line: string) => line.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim());
+
+const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '') => {
+  const rendered: ReactNode[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const key = `${keyPrefix}-${index}`;
+    if (line.includes('|') && isTableSeparator(lines[index + 1] || '')) {
+      const headers = splitTableRow(line);
+      const rows: string[][] = [];
+      let cursor = index + 2;
+      while (cursor < lines.length && lines[cursor].includes('|') && lines[cursor].trim()) {
+        rows.push(splitTableRow(lines[cursor]));
+        cursor += 1;
+      }
+      rendered.push(<div key={key} className="my-5 overflow-x-auto rounded-xl border border-zinc-200 bg-white shadow-sm"><table className="min-w-full border-collapse text-left text-sm"><thead className="bg-zinc-50 text-xs font-semibold text-zinc-500"><tr>{headers.map((header, column) => <th key={`${key}-head-${column}`} className="border-b border-zinc-200 px-4 py-3 align-top">{renderInlineMarkdown(header, `${key}-head-${column}`, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</th>)}</tr></thead><tbody className="divide-y divide-zinc-100 text-zinc-700">{rows.map((row, rowIndex) => <tr key={`${key}-row-${rowIndex}`} className="hover:bg-zinc-50/70">{headers.map((_, column) => <td key={`${key}-cell-${rowIndex}-${column}`} className="px-4 py-3 align-top leading-6">{renderInlineMarkdown(row[column] || '', `${key}-cell-${rowIndex}-${column}`, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</td>)}</tr>)}</tbody></table></div>);
+      index = cursor - 1;
+      continue;
+    }
+    if (!line.trim()) {
+      rendered.push(<div key={key} className="h-3" />);
+      continue;
+    }
   const heading = line.match(/^(#{1,3})\s+(.+)$/);
   if (heading) {
     const level = heading[1].length;
     const className = level === 1 ? 'mt-2 text-2xl font-bold tracking-tight text-zinc-900' : level === 2 ? 'mt-9 text-xl font-semibold text-zinc-900' : 'mt-6 text-base font-semibold text-zinc-900';
-    return <h2 key={key} className={className}>{renderInlineMarkdown(heading[2], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</h2>;
+    rendered.push(<h2 key={key} className={className}>{renderInlineMarkdown(heading[2], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</h2>);
+    continue;
   }
   const task = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
-  if (task) return <div key={key} className="flex gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm"><span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${task[1].toLowerCase() === 'x' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-zinc-300'}`}>{task[1].toLowerCase() === 'x' ? <Check size={12} /> : null}</span><span>{renderInlineMarkdown(task[2], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</span></div>;
+  if (task) {
+    rendered.push(<div key={key} className="flex gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm"><span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${task[1].toLowerCase() === 'x' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-zinc-300'}`}>{task[1].toLowerCase() === 'x' ? <Check size={12} /> : null}</span><span>{renderInlineMarkdown(task[2], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</span></div>);
+    continue;
+  }
   const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
-  if (ordered) return <div key={key} className="flex gap-3 pl-1"><span className="font-medium text-zinc-400">{line.match(/^\s*(\d+)/)?.[1]}.</span><span>{renderInlineMarkdown(ordered[1], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</span></div>;
+  if (ordered) {
+    rendered.push(<div key={key} className="flex gap-3 pl-1"><span className="font-medium text-zinc-400">{line.match(/^\s*(\d+)/)?.[1]}.</span><span>{renderInlineMarkdown(ordered[1], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</span></div>);
+    continue;
+  }
   const bullet = line.match(/^\s*[-*]\s+(.+)$/);
-  if (bullet) return <div key={key} className="flex gap-3 pl-1"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" /><span>{renderInlineMarkdown(bullet[1], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</span></div>;
-  return <p key={key}>{renderInlineMarkdown(line, key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</p>;
-});
+  if (bullet) {
+    rendered.push(<div key={key} className="flex gap-3 pl-1"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" /><span>{renderInlineMarkdown(bullet[1], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</span></div>);
+    continue;
+  }
+  rendered.push(<p key={key}>{renderInlineMarkdown(line, key, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</p>);
+  }
+  return rendered;
+};
 
 const RenderedDerivation = ({ content, sourceText, activeCitation, onCitationClick, onRevealOriginal }: { content: string; sourceText: string; activeCitation: InlineCitation | null; onCitationClick: (citation: InlineCitation) => void; onRevealOriginal: () => void }) => {
   const lines = content.replace(/\r\n/g, '\n').split('\n');
@@ -449,16 +495,31 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     const root = originalDocumentRef.current;
     if (!root || !quote.trim()) return;
     root.querySelectorAll('[data-inline-source-highlight]').forEach(mark => mark.replaceWith(document.createTextNode(mark.textContent || '')));
-    const normalizedQuote = quote.replace(/\s+/g, ' ').trim();
+    root.querySelectorAll('[data-inline-source-highlight-block]').forEach(element => element.classList.remove('rounded', 'bg-amber-200/80', 'px-0.5'));
+    const normalizedQuote = normalizeCitationText(quote);
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const locations: Array<{ node: Text; offset: number }> = [];
+    let searchableText = '';
     let node: Text | null = walker.nextNode() as Text | null;
     while (node) {
-      const normalizedNode = node.textContent?.replace(/\s+/g, ' ') || '';
-      const start = normalizedNode.indexOf(normalizedQuote);
-      if (start >= 0) {
+      const rawText = node.textContent || '';
+      for (let offset = 0; offset < rawText.length; offset += 1) {
+        const normalizedCharacter = normalizeCitationText(rawText[offset]);
+        for (const character of normalizedCharacter) {
+          searchableText += character;
+          locations.push({ node, offset });
+        }
+      }
+      node = walker.nextNode() as Text | null;
+    }
+    const start = searchableText.indexOf(normalizedQuote);
+    if (start >= 0) {
+      const startLocation = locations[start];
+      const endLocation = locations[start + normalizedQuote.length - 1];
+      if (startLocation && endLocation && startLocation.node === endLocation.node) {
         const range = document.createRange();
-        range.setStart(node, start);
-        range.setEnd(node, start + normalizedQuote.length);
+        range.setStart(startLocation.node, startLocation.offset);
+        range.setEnd(endLocation.node, endLocation.offset + 1);
         const mark = document.createElement('mark');
         mark.dataset.inlineSourceHighlight = 'true';
         mark.className = 'rounded bg-amber-200/80 px-0.5 text-zinc-900 transition-colors';
@@ -471,7 +532,19 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         }, 1000);
         return;
       }
-      node = walker.nextNode() as Text | null;
+      // A citation may cross inline tags or source paragraphs. In that case,
+      // highlight the containing source block rather than failing silently.
+      const block = startLocation?.node.parentElement?.closest('p, li, td, th, h1, h2, h3, h4, h5, h6') || startLocation?.node.parentElement;
+      if (block) {
+        block.setAttribute('data-inline-source-highlight-block', 'true');
+        block.classList.add('rounded', 'bg-amber-200/80', 'px-0.5');
+        block.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
+        citationHighlightTimer.current = window.setTimeout(() => {
+          block.classList.remove('rounded', 'bg-amber-200/80', 'px-0.5');
+          citationHighlightTimer.current = null;
+        }, 1400);
+      }
     }
   };
   const openInlineCitation = (citation: InlineCitation) => {

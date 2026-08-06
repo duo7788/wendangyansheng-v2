@@ -14,11 +14,12 @@ interface DirectoryProps {
   comments: DocComment[];
   onMarkCommentsRead: (docId: string, viewerId: string) => void;
   appliedDerivations: Record<string, Set<string>>;
+  generatedDerivations: Record<string, Set<string>>;
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
 }
 
-export function Directory({ activeApp, activeItemId, setActiveItemId, libraries = [], chats = [], activeUserId, comments, onMarkCommentsRead, appliedDerivations, isCollapsed, setIsCollapsed }: DirectoryProps) {
+export function Directory({ activeApp, activeItemId, setActiveItemId, libraries = [], chats = [], activeUserId, comments, onMarkCommentsRead, appliedDerivations, generatedDerivations, isCollapsed, setIsCollapsed }: DirectoryProps) {
   const [expandedLibs, setExpandedLibs] = useState<Record<string, boolean>>({
     'lib1': true,
     'lib2': true,
@@ -175,8 +176,10 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
                       exit={{ height: 0, opacity: 0 }}
                       className="overflow-hidden flex flex-col gap-0.5 mt-1"
                     >
-                      {lib.docs.map((doc) => (
-                        <div key={doc.id}>
+                      {lib.docs.map((doc) => {
+                        const appliedRoles = appliedDerivations[doc.id] || new Set<string>();
+                        const generatedRoles = generatedDerivations[doc.id] || appliedRoles;
+                        return <div key={doc.id}>
                         <button
                           onClick={() => setActiveItemId(doc.id)}
                           className={`w-full flex items-center gap-3 p-2.5 pl-8 rounded-xl text-left transition-all ${
@@ -193,22 +196,22 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
                             <p className="text-xs text-zinc-500 truncate mt-0.5">修改于 {doc.updatedAt}</p>
                           </div>
                         </button>
-                        {activeUserId === 'u_jobs' && (appliedDerivations[doc.id]?.size || 0) > 0 && (
+                        {activeUserId === 'u_jobs' && generatedRoles.size > 0 && (
                           <div className="ml-8 mt-0.5">
                             <button onClick={() => setExpandedDerivations(prev => ({ ...prev, [doc.id]: !prev[doc.id] }))} className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-zinc-500 hover:text-indigo-700">
                               {expandedDerivations[doc.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                               <Sparkles size={12} className="text-indigo-500" />
-                              {appliedDerivations[doc.id].size} 个衍生文档
+                              {generatedRoles.size} 个衍生文档 · 已应用 {appliedRoles.size} 个
                             </button>
                             <AnimatePresence>
                               {expandedDerivations[doc.id] && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-4">
-                                {Array.from(appliedDerivations[doc.id]).map(roleId => <button key={roleId} onClick={() => setActiveItemId(`${doc.id}|${roleId}`)} className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs ${activeItemId === `${doc.id}|${roleId}` ? 'bg-indigo-50 text-indigo-700' : 'text-zinc-500 hover:bg-zinc-100'}`}><Sparkles size={12} /><span className="truncate">{roleNames[roleId] || '自定义角色'} · 衍生文档</span></button>)}
+                                {Array.from(appliedRoles).map(roleId => <button key={roleId} onClick={() => setActiveItemId(`${doc.id}|${roleId}`)} className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs ${activeItemId === `${doc.id}|${roleId}` ? 'bg-indigo-50 text-indigo-700' : 'text-zinc-500 hover:bg-zinc-100'}`}><Sparkles size={12} /><span className="truncate">{roleNames[roleId] || '自定义角色'} · 衍生文档</span></button>)}
                               </motion.div>}
                             </AnimatePresence>
                           </div>
                         )}
-                        </div>
-                      ))}
+                        </div>;
+                      })}
                     </motion.div>
                   )}
                 </AnimatePresence>

@@ -107,7 +107,7 @@ const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick
         rows.push(splitTableRow(lines[cursor]));
         cursor += 1;
       }
-      rendered.push(<div key={key} className="my-5 overflow-x-auto rounded-xl border border-zinc-200 bg-white shadow-sm"><table className="min-w-full border-collapse text-left text-sm"><thead className="bg-zinc-50 text-xs font-semibold text-zinc-500"><tr>{headers.map((header, column) => <th key={`${key}-head-${column}`} className="border-b border-zinc-200 px-4 py-3 align-top">{renderInlineMarkdown(header, `${key}-head-${column}`, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</th>)}</tr></thead><tbody className="divide-y divide-zinc-100 text-zinc-700">{rows.map((row, rowIndex) => <tr key={`${key}-row-${rowIndex}`} className="hover:bg-zinc-50/70">{headers.map((_, column) => <td key={`${key}-cell-${rowIndex}-${column}`} className="px-4 py-3 align-top leading-6">{renderInlineMarkdown(row[column] || '', `${key}-cell-${rowIndex}-${column}`, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</td>)}</tr>)}</tbody></table></div>);
+      rendered.push(<div key={key} className="my-5 rounded-xl border border-zinc-200 bg-white shadow-sm"><table className="min-w-full border-collapse text-left text-sm"><thead className="bg-zinc-50 text-xs font-semibold text-zinc-500"><tr>{headers.map((header, column) => <th key={`${key}-head-${column}`} className="border-b border-zinc-200 px-4 py-3 align-top">{renderInlineMarkdown(header, `${key}-head-${column}`, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</th>)}</tr></thead><tbody className="divide-y divide-zinc-100 text-zinc-700">{rows.map((row, rowIndex) => <tr key={`${key}-row-${rowIndex}`} className="hover:bg-zinc-50/70">{headers.map((_, column) => <td key={`${key}-cell-${rowIndex}-${column}`} className="px-4 py-3 align-top leading-6">{renderInlineMarkdown(row[column] || '', `${key}-cell-${rowIndex}-${column}`, onCitationClick, activeCitationId, onRevealOriginal, sourceText)}</td>)}</tr>)}</tbody></table></div>);
       index = cursor - 1;
       continue;
     }
@@ -163,6 +163,7 @@ interface DocWorkspaceProps {
   initialRoleId?: string | null;
   appliedRoleIds: Set<string>;
   onApplyDerivation: (docId: string, roleId: string, shouldApply: boolean) => void;
+  onGeneratedDerivation: (docId: string, roleId: string) => void;
   canManageDerivations: boolean;
   comments: DocComment[];
   onAddComment: (comment: Omit<DocComment, 'id' | 'createdAt'>) => void;
@@ -170,7 +171,7 @@ interface DocWorkspaceProps {
   reviewMode?: boolean;
 }
 
-export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, canManageDerivations, comments, onAddComment, activeUserId, reviewMode = false }: DocWorkspaceProps) {
+export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, canManageDerivations, comments, onAddComment, activeUserId, reviewMode = false }: DocWorkspaceProps) {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set<string>(initialRoleId ? [initialRoleId] : []));
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
@@ -200,6 +201,8 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [bodyTitle, setBodyTitle] = useState('');
   const [bodyText, setBodyText] = useState('');
   const citationHighlightTimer = useRef<number | null>(null);
+  const citationScrollSettleTimer = useRef<number | null>(null);
+  const citationScrollListener = useRef<((event: Event) => void) | null>(null);
   const originalDocumentRef = useRef<HTMLDivElement>(null);
   const [mentionMenu, setMentionMenu] = useState<MentionMenu | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
@@ -234,6 +237,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           return result;
         }, {});
         setGeneratedDerivations(restored);
+        Object.keys(restored).forEach(roleId => onGeneratedDerivation(doc.id, roleId));
         setActiveDerivativeRoles(previous => Array.from(new Set([...previous, ...Object.keys(restored)])));
       })
       // The endpoint is unavailable in plain `vite` development. Vercel deploys it.
@@ -255,6 +259,8 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
 
   useEffect(() => () => {
     if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
+    if (citationScrollSettleTimer.current) window.clearTimeout(citationScrollSettleTimer.current);
+    if (citationScrollListener.current) window.removeEventListener('scroll', citationScrollListener.current, true);
   }, []);
 
   useEffect(() => {
@@ -427,6 +433,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           generatedAt: data.derivation.updated_at,
         },
       }));
+      onGeneratedDerivation(doc.id, roleId);
     } catch (error) {
       setGenerationErrors(prev => ({ ...prev, [roleId]: error instanceof Error ? error.message : '生成失败，请稍后重试' }));
     } finally {
@@ -489,6 +496,25 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       <span className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-zinc-200 bg-white" />
     </span>
   ) : null;
+  const runAfterSourceScrollSettles = (callback: () => void) => {
+    if (citationScrollSettleTimer.current) window.clearTimeout(citationScrollSettleTimer.current);
+    if (citationScrollListener.current) window.removeEventListener('scroll', citationScrollListener.current, true);
+    let lastScrollAt = Date.now();
+    const onScroll = () => { lastScrollAt = Date.now(); };
+    citationScrollListener.current = onScroll;
+    window.addEventListener('scroll', onScroll, true);
+    const waitForSettle = () => {
+      if (Date.now() - lastScrollAt < 150) {
+        citationScrollSettleTimer.current = window.setTimeout(waitForSettle, 150);
+        return;
+      }
+      window.removeEventListener('scroll', onScroll, true);
+      citationScrollListener.current = null;
+      citationScrollSettleTimer.current = null;
+      callback();
+    };
+    citationScrollSettleTimer.current = window.setTimeout(waitForSettle, 180);
+  };
   // Same yellow, one-second source emphasis as the mock citation interaction,
   // but the target sentence now comes from Kimi's inline [[cite:...]] marker.
   const flashInlineOriginal = (quote: string) => {
@@ -517,33 +543,37 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       const startLocation = locations[start];
       const endLocation = locations[start + normalizedQuote.length - 1];
       if (startLocation && endLocation && startLocation.node === endLocation.node) {
-        const range = document.createRange();
-        range.setStart(startLocation.node, startLocation.offset);
-        range.setEnd(endLocation.node, endLocation.offset + 1);
-        const mark = document.createElement('mark');
-        mark.dataset.inlineSourceHighlight = 'true';
-        mark.className = 'rounded bg-amber-200/80 px-0.5 text-zinc-900 transition-colors';
-        range.surroundContents(mark);
-        mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
-        citationHighlightTimer.current = window.setTimeout(() => {
-          mark.replaceWith(document.createTextNode(mark.textContent || ''));
-          citationHighlightTimer.current = null;
-        }, 1000);
+        startLocation.node.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        runAfterSourceScrollSettles(() => {
+          const range = document.createRange();
+          range.setStart(startLocation.node, startLocation.offset);
+          range.setEnd(endLocation.node, endLocation.offset + 1);
+          const mark = document.createElement('mark');
+          mark.dataset.inlineSourceHighlight = 'true';
+          mark.className = 'rounded bg-amber-200/80 px-0.5 text-zinc-900 transition-colors';
+          range.surroundContents(mark);
+          if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
+          citationHighlightTimer.current = window.setTimeout(() => {
+            mark.replaceWith(document.createTextNode(mark.textContent || ''));
+            citationHighlightTimer.current = null;
+          }, 1000);
+        });
         return;
       }
       // A citation may cross inline tags or source paragraphs. In that case,
       // highlight the containing source block rather than failing silently.
       const block = startLocation?.node.parentElement?.closest('p, li, td, th, h1, h2, h3, h4, h5, h6') || startLocation?.node.parentElement;
       if (block) {
-        block.setAttribute('data-inline-source-highlight-block', 'true');
-        block.classList.add('rounded', 'bg-amber-200/80', 'px-0.5');
         block.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
-        citationHighlightTimer.current = window.setTimeout(() => {
-          block.classList.remove('rounded', 'bg-amber-200/80', 'px-0.5');
-          citationHighlightTimer.current = null;
-        }, 1400);
+        runAfterSourceScrollSettles(() => {
+          block.setAttribute('data-inline-source-highlight-block', 'true');
+          block.classList.add('rounded', 'bg-amber-200/80', 'px-0.5');
+          if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
+          citationHighlightTimer.current = window.setTimeout(() => {
+            block.classList.remove('rounded', 'bg-amber-200/80', 'px-0.5');
+            citationHighlightTimer.current = null;
+          }, 1000);
+        });
       }
     }
   };

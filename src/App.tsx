@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Directory } from './components/Directory';
 import { Workspace } from './components/Workspace';
@@ -30,6 +30,7 @@ export default function App() {
   const [chats, setChats] = useState<ChatItem[]>(initialMockChats);
   const [activeUserId, setActiveUserId] = useState<string>('u_jobs');
   const [appliedDerivations, setAppliedDerivations] = useState<Record<string, Set<string>>>({});
+  const [generatedDerivations, setGeneratedDerivations] = useState<Record<string, Set<string>>>({});
   const [comments, setComments] = useState<DocComment[]>([]);
 
   const handleShareDoc = (chatId: string, doc: DocItem) => {
@@ -111,6 +112,15 @@ export default function App() {
       return next;
     });
   };
+
+  const handleGeneratedDerivation = useCallback((docId: string, roleId: string) => {
+    setGeneratedDerivations(previous => {
+      const next = { ...previous };
+      next[docId] = new Set(next[docId] || []);
+      next[docId].add(roleId);
+      return next;
+    });
+  }, []);
 
   const handleAddComment = (comment: Omit<DocComment, 'id' | 'createdAt'>) => {
     const createdAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -195,6 +205,7 @@ export default function App() {
         comments={comments}
         onMarkCommentsRead={handleMarkCommentsRead}
         appliedDerivations={appliedDerivations}
+        generatedDerivations={generatedDerivations}
         isCollapsed={isDirCollapsed}
         setIsCollapsed={setIsDirCollapsed}
       />
@@ -212,6 +223,7 @@ export default function App() {
         initialDerivativeRole={initialDerivativeRole}
         appliedRoleIds={selectedDocId ? appliedDerivations[selectedDocId] || new Set<string>() : new Set<string>()}
         onApplyDerivation={handleApplyDerivation}
+        onGeneratedDerivation={handleGeneratedDerivation}
         comments={comments}
         onAddComment={handleAddComment}
         onMarkCommentsRead={handleMarkCommentsRead}

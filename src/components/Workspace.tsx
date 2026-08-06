@@ -19,6 +19,7 @@ interface WorkspaceProps {
   initialDerivativeRole: string | null;
   appliedRoleIds: Set<string>;
   onApplyDerivation: (docId: string, roleId: string, shouldApply: boolean) => void;
+  onGeneratedDerivation: (docId: string, roleId: string) => void;
   comments: DocComment[];
   onAddComment: (comment: Omit<DocComment, 'id' | 'createdAt'>) => void;
   onMarkCommentsRead: (docId: string, viewerId: string) => void;
@@ -28,14 +29,14 @@ interface WorkspaceProps {
   setActiveItemId: (id: string | null) => void;
 }
 
-export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onUpdateDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, comments, onAddComment, onMarkCommentsRead, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
+export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onUpdateDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, comments, onAddComment, onMarkCommentsRead, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
   
   const renderContent = () => {
     const reviewMatch = activeItemId?.match(/^review:([^:]+):([^:]+)$/);
     if (activeApp === 'messages' && reviewMatch) {
       const doc = libraries.flatMap(library => library.docs).find(item => item.id === reviewMatch[1]);
       const reviewerRole = reviewMatch[2] === 'u1' ? 'backend' : undefined;
-      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={reviewerRole} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id && (comment.authorId === reviewMatch[2] || comment.recipientId === reviewMatch[2]))} onAddComment={onAddComment} activeUserId={activeUserId} reviewMode />;
+      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={reviewerRole} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id && (comment.authorId === reviewMatch[2] || comment.recipientId === reviewMatch[2]))} onAddComment={onAddComment} activeUserId={activeUserId} reviewMode />;
     }
     if (!activeItemId) {
       if (activeApp === 'docs') {
@@ -71,7 +72,7 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
       const [actualDocId, roleId] = activeItemId.split('|');
       const doc = allDocs.find(d => d.id === actualDocId);
       const library = libraries.find(item => item.docs.some(item => item.id === actualDocId));
-      if (doc) return <DocWorkspace doc={doc} libraryName={library?.name} onUpdateDoc={onUpdateDoc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={initialDerivativeRole || roleId} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} activeUserId={activeUserId} />;
+      if (doc) return <DocWorkspace doc={doc} libraryName={library?.name} onUpdateDoc={onUpdateDoc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={initialDerivativeRole || roleId} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} activeUserId={activeUserId} />;
     }
 
     return (

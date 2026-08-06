@@ -4,6 +4,8 @@
  * Keeps the Kimi and Supabase secret keys on the server.  The browser only
  * calls /api/generate-derivation and never receives either key.
  */
+import { createHash } from 'node:crypto';
+
 const KIMI_API_URL = 'https://api.moonshot.cn/v1/chat/completions';
 
 function required(value, name) {
@@ -113,6 +115,10 @@ export default async function handler(req, res) {
       related_document_ids: relatedDocuments.map((doc) => doc.id),
       content,
       model,
+      // This is the exact plain-text source sent to the model.  Saving its
+      // hash lets the client later tell which role views are affected by an
+      // original-document edit, without storing another copy of the source.
+      source_content_hash: createHash('sha256').update(sourceDocument.content).digest('hex'),
     });
     return json(res, 200, { derivation: saved });
   } catch (error) {

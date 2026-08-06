@@ -16,6 +16,13 @@ type GeneratedDerivation = {
   content: string;
   relatedDocumentIds: string[];
   generatedAt: string;
+  sourceContentHash?: string | null;
+};
+
+type DerivationUpdate = {
+  roleId: string;
+  targetSourceContentHash: string;
+  status: string;
 };
 
 type MentionMenu = {
@@ -47,6 +54,11 @@ const toAiText = (content: string, maxLength = 30000) => {
     .filter(Boolean);
   const plainText = blocks.length ? blocks.join('\n') : (parsed.body.textContent || content);
   return plainText.replace(/\n{3,}/g, '\n\n').trim().slice(0, maxLength);
+};
+
+const hashSourceText = async (content: string) => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
 };
 
 type InlineCitation = { id: number; quote: string };
@@ -184,6 +196,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [activeDerivativeDocs, setActiveDerivativeDocs] = useState<string[]>([]);
   const [loadingRoles, setLoadingRoles] = useState<Record<string, boolean>>({});
   const [generatedDerivations, setGeneratedDerivations] = useState<Record<string, GeneratedDerivation>>({});
+  const [sourceContentHash, setSourceContentHash] = useState<string | null>(null);
+  const [derivationUpdates, setDerivationUpdates] = useState<DerivationUpdate[]>([]);
+  const [isPreparingUpdates, setIsPreparingUpdates] = useState(false);
+  const [updatePreparationError, setUpdatePreparationError] = useState('');
   const [generationErrors, setGenerationErrors] = useState<Record<string, string>>({});
   const [viewingDerivativeRole, setViewingDerivativeRole] = useState<string | null>(reviewMode && canManageDerivations ? null : initialRoleId || null);
   const [highlightedCitation, setHighlightedCitation] = useState<string | null>(null);
@@ -204,6 +220,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const citationScrollSettleTimer = useRef<number | null>(null);
   const citationScrollListener = useRef<((event: Event) => void) | null>(null);
   const originalDocumentRef = useRef<HTMLDivElement>(null);
+  const initialSourceHashRef = useRef<string | null>(null);
   const [mentionMenu, setMentionMenu] = useState<MentionMenu | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
 
@@ -232,8 +249,8 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       .then(response => response.ok ? response.json() : Promise.reject(new Error('无法读取已保存的衍生文档')))
       .then(data => {
         if (cancelled) return;
-        const restored = (data.derivations || []).reduce((result: Record<string, GeneratedDerivation>, item: { role_id: string; content: string; related_document_ids: string[]; updated_at: string }) => {
-          result[item.role_id] = { content: item.content, relatedDocumentIds: item.related_document_ids || [], generatedAt: item.updated_at };
+        const restored = (data.derivations || []).reduce((result: Record<string, GeneratedDerivation>, item: { role_id: string; content: string; related_document_ids: string[]; source_content_hash?: string | null; updated_at: string }) => {
+          result[item.role_id] = { content: item.content, relatedDocumentIds: item.related_document_ids || [], sourceContentHash: item.source_content_hash, generatedAt: item.updated_at };
           return result;
         }, {});
         setGeneratedDerivations(restored);
@@ -241,6 +258,43 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         setActiveDerivativeRoles(previous => Array.from(new Set([...previous, ...Object.keys(restored)])));
       })
       // The endpoint is unavailable in plain `vite` development. Vercel deploys it.
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [doc.id]);
+
+  // The model receives plain text, so this same normalised value is the
+  // version identity for both generation and later change detection.
+  const sourceTextForAi = toAiText(doc.content || getSourceDocumentContent());
+  useEffect(() => {
+    let cancelled = false;
+    void hashSourceText(sourceTextForAi).then(hash => {
+      if (!cancelled) setSourceContentHash(hash);
+    });
+    return () => { cancelled = true; };
+  }, [sourceTextForAi]);
+
+  // This only resets when switching documents. It lets legacy generations
+  // without a stored hash still be marked after an edit made in this session.
+  useEffect(() => {
+    let cancelled = false;
+    void hashSourceText(sourceTextForAi).then(hash => {
+      if (!cancelled) initialSourceHashRef.current = hash;
+    });
+    return () => { cancelled = true; };
+  }, [doc.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/derivation-updates?sourceDocumentId=${encodeURIComponent(doc.id)}`)
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('无法读取更新状态')))
+      .then(data => {
+        if (cancelled) return;
+        setDerivationUpdates((data.updates || []).map((item: { role_id: string; target_source_content_hash: string; status: string }) => ({
+          roleId: item.role_id,
+          targetSourceContentHash: item.target_source_content_hash,
+          status: item.status,
+        })));
+      })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [doc.id]);
@@ -418,7 +472,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         }),
       });
       const responseText = await response.text();
-      let data: { derivation?: { content: string; related_document_ids?: string[]; updated_at: string }; error?: string };
+      let data: { derivation?: { content: string; related_document_ids?: string[]; source_content_hash?: string | null; updated_at: string }; error?: string };
       try {
         data = JSON.parse(responseText);
       } catch {
@@ -430,6 +484,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         [roleId]: {
           content: data.derivation.content,
           relatedDocumentIds: data.derivation.related_document_ids || relatedDocIds,
+          sourceContentHash: data.derivation.source_content_hash || null,
           generatedAt: data.derivation.updated_at,
         },
       }));
@@ -459,6 +514,46 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   };
 
   const selectedDocs = allDocs.filter(d => selectedDocIds.has(d.id));
+  const sourceWasEditedThisSession = Boolean(sourceContentHash && initialSourceHashRef.current && sourceContentHash !== initialSourceHashRef.current);
+  const updateCandidateRoleIds = sourceContentHash ? (Object.entries(generatedDerivations) as Array<[string, GeneratedDerivation]>)
+    .filter(([, derivation]) => derivation.sourceContentHash
+      ? derivation.sourceContentHash !== sourceContentHash
+      : sourceWasEditedThisSession)
+    .map(([roleId]) => roleId) : [];
+  const pendingUpdateRoleIds = new Set(derivationUpdates
+    .filter(update => update.status === 'pending' && update.targetSourceContentHash === sourceContentHash)
+    .map(update => update.roleId));
+  const unpreparedUpdateRoleIds = updateCandidateRoleIds.filter(roleId => !pendingUpdateRoleIds.has(roleId));
+
+  const prepareDerivationUpdates = async () => {
+    if (!sourceContentHash || unpreparedUpdateRoleIds.length === 0) return;
+    setIsPreparingUpdates(true);
+    setUpdatePreparationError('');
+    try {
+      const response = await fetch('/api/derivation-updates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceDocumentId: doc.id,
+          updates: unpreparedUpdateRoleIds.map(roleId => ({
+            roleId,
+            baseSourceContentHash: generatedDerivations[roleId]?.sourceContentHash || null,
+            targetSourceContentHash: sourceContentHash,
+          })),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '保存更新状态失败');
+      setDerivationUpdates(previous => {
+        const retained = previous.filter(update => !data.updates.some((item: { role_id: string; target_source_content_hash: string }) => update.roleId === item.role_id && update.targetSourceContentHash === item.target_source_content_hash));
+        return [...retained, ...data.updates.map((item: { role_id: string; target_source_content_hash: string; status: string }) => ({ roleId: item.role_id, targetSourceContentHash: item.target_source_content_hash, status: item.status }))];
+      });
+    } catch (error) {
+      setUpdatePreparationError(error instanceof Error ? error.message : '保存更新状态失败');
+    } finally {
+      setIsPreparingUpdates(false);
+    }
+  };
   const flashOriginalCitation = (citationId: '1' | '2') => {
     setHighlightedCitation(citationId);
     if (citationHighlightTimer.current) window.clearTimeout(citationHighlightTimer.current);
@@ -754,6 +849,19 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         >
           {!canManageDerivations && <button onClick={closeOriginal} aria-label="关闭原文" className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-700"><X size={17} /></button>}
           <div ref={originalDocumentRef} onKeyUp={updateMentionMenu} onKeyDown={handleEditorKeyDown} className="max-w-4xl mx-auto px-12 py-16">
+            {canManageDerivations && (unpreparedUpdateRoleIds.length > 0 || pendingUpdateRoleIds.size > 0) && (
+              <div className="mb-7 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                {unpreparedUpdateRoleIds.length > 0 ? <>
+                  <p className="text-sm font-semibold text-amber-950">原文已修改</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-800">{unpreparedUpdateRoleIds.length} 个衍生文档可以准备更新。确认后只会记录待更新状态，不会改写内容或通知角色。</p>
+                  {updatePreparationError && <p className="mt-2 text-xs text-rose-700">{updatePreparationError}</p>}
+                  <button onClick={() => void prepareDerivationUpdates()} disabled={isPreparingUpdates} className="mt-3 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60">{isPreparingUpdates ? '正在确认…' : `确认准备 ${unpreparedUpdateRoleIds.length} 个更新`}</button>
+                </> : <>
+                  <p className="text-sm font-semibold text-amber-950">已确认准备更新</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-800">{pendingUpdateRoleIds.size} 个衍生文档已标记为待更新。后续生成局部更新建议后，再由你决定是否发送给角色。</p>
+                </>}
+              </div>
+            )}
             <div className="mb-6 flex items-center gap-3">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-100 text-xs font-medium text-zinc-600">
                 {doc.type === 'document' ? '文档' : doc.type === 'spreadsheet' ? '表格' : doc.type === 'presentation' ? '演示文稿' : '文件夹'}
@@ -769,6 +877,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 dangerouslySetInnerHTML={{ __html: doc.content }} 
                 contentEditable 
                 suppressContentEditableWarning 
+                onBlur={event => onUpdateDoc?.(doc.id, { content: event.currentTarget.innerHTML })}
               />
             ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed font-normal">

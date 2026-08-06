@@ -18,11 +18,6 @@ type GeneratedDerivation = {
   generatedAt: string;
 };
 
-type DocumentUnderstanding = {
-  id: string;
-  facts: Array<{ id: string; statement: string; evidence: Array<{ block_id: string; quote: string }> }>;
-};
-
 type MentionMenu = {
   query: string;
   range: Range;
@@ -350,7 +345,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     }
   };
 
-  const generateForRole = async (roleId: string, relatedDocIds: string[], understanding?: DocumentUnderstanding | null) => {
+  const generateForRole = async (roleId: string, relatedDocIds: string[]) => {
     const role = roles.find(item => item.id === roleId);
     if (!role) return;
     setLoadingRoles(prev => ({ ...prev, [roleId]: true }));
@@ -368,7 +363,6 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           sourceDocument: { id: doc.id, title: doc.title, content: toAiText(doc.content || getSourceDocumentContent()) },
           role: { id: role.id, name: role.name },
           relatedDocuments,
-          understanding,
         }),
       });
       const responseText = await response.text();
@@ -405,29 +399,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     setIsDirCollapsed(true);
     setViewingDerivativeRole(null);
     
-    void (async () => {
-      const relatedDocIds = Array.from(selectedDocIds) as string[];
-      let understanding: DocumentUnderstanding | null = null;
-      if (rolesArray.length >= 2) {
-        setLoadingRoles(previous => Object.fromEntries(rolesArray.map(roleId => [roleId, true])));
-        try {
-          const relatedDocuments = allDocs.filter(item => relatedDocIds.includes(item.id)).map(item => ({ id: item.id, title: item.title, content: toAiText(item.content || '') }));
-          const response = await fetch('/api/generate-understanding', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourceDocument: { id: doc.id, title: doc.title, content: toAiText(doc.content || getSourceDocumentContent()) }, relatedDocuments }),
-          });
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error || '生成文档理解底稿失败');
-          understanding = data.understanding;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : '生成文档理解底稿失败';
-          setGenerationErrors(previous => Object.fromEntries(rolesArray.map(roleId => [roleId, message])));
-          setLoadingRoles(previous => Object.fromEntries(rolesArray.map(roleId => [roleId, false])));
-          return;
-        }
-      }
-      await Promise.all(rolesArray.map(roleId => generateForRole(roleId, relatedDocIds, understanding)));
-    })();
+    // Generate only the roles the user selected. A full-document understanding
+    // pass is intentionally not on this critical path: it added a serial model
+    // request and made first-time generation slower than the original product.
+    void Promise.all(rolesArray.map(roleId => generateForRole(roleId, Array.from(selectedDocIds))));
   };
 
   const selectedDocs = allDocs.filter(d => selectedDocIds.has(d.id));

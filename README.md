@@ -20,6 +20,8 @@
    - `SUPABASE_SERVICE_ROLE_KEY`：同一页的 `service_role` key；它只能填进 Vercel，绝不能填入 `VITE_` 变量或前端代码。
 3. 重新部署 Vercel 项目。打开文档，选择角色并点击“生成衍生”，即可验证生成与保存。
 
+当一次选择两个或以上角色时，系统会先生成并缓存一份带原文依据的结构化理解底稿；这些角色视图复用底稿，不会分别重复阅读全文。原文或关联资料变化后会生成新的底稿版本。对于已部署的项目，请在 Supabase SQL Editor 执行 [理解底稿迁移](supabase/migrations/20260806_document_understandings.sql)；新项目仍可直接执行完整的 [schema.sql](supabase/schema.sql)。
+
 生成后的角色版本会在重新打开页面时从 Supabase 读取。当前原型尚未加入登录/成员权限；正式对外使用前，应先加 Supabase Auth，并在 API 中验证用户是否有该文档权限。
 
 ## Run Locally

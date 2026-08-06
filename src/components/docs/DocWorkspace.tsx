@@ -18,6 +18,11 @@ type GeneratedDerivation = {
   generatedAt: string;
 };
 
+type DocumentUnderstanding = {
+  id: string;
+  facts: Array<{ id: string; statement: string; evidence: Array<{ block_id: string; quote: string }> }>;
+};
+
 type MentionMenu = {
   query: string;
   range: Range;
@@ -41,8 +46,12 @@ const getSourceDocumentContent = () => `本文档作为项目的唯一事实来�
 // AI needs the document's meaning, not its editor markup or embedded image
 // data. Removing those keeps requests below Vercel's serverless body limit.
 const toAiText = (content: string, maxLength = 30000) => {
-  const plainText = new DOMParser().parseFromString(content, 'text/html').body.textContent || content;
-  return plainText.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+  const parsed = new DOMParser().parseFromString(content, 'text/html');
+  const blocks = Array.from(parsed.body.querySelectorAll('h1, h2, h3, h4, h5, h6, p, li'))
+    .map(block => block.textContent?.replace(/\s+/g, ' ').trim() || '')
+    .filter(Boolean);
+  const plainText = blocks.length ? blocks.join('\n') : (parsed.body.textContent || content);
+  return plainText.replace(/\n{3,}/g, '\n\n').trim().slice(0, maxLength);
 };
 
 type InlineCitation = { id: number; quote: string };
@@ -341,7 +350,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     }
   };
 
-  const generateForRole = async (roleId: string, relatedDocIds: string[]) => {
+  const generateForRole = async (roleId: string, relatedDocIds: string[], understanding?: DocumentUnderstanding | null) => {
     const role = roles.find(item => item.id === roleId);
     if (!role) return;
     setLoadingRoles(prev => ({ ...prev, [roleId]: true }));
@@ -359,6 +368,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           sourceDocument: { id: doc.id, title: doc.title, content: toAiText(doc.content || getSourceDocumentContent()) },
           role: { id: role.id, name: role.name },
           relatedDocuments,
+          understanding,
         }),
       });
       const responseText = await response.text();
@@ -395,7 +405,29 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     setIsDirCollapsed(true);
     setViewingDerivativeRole(null);
     
-    void Promise.all(rolesArray.map(roleId => generateForRole(roleId, Array.from(selectedDocIds))));
+    void (async () => {
+      const relatedDocIds = Array.from(selectedDocIds) as string[];
+      let understanding: DocumentUnderstanding | null = null;
+      if (rolesArray.length >= 2) {
+        setLoadingRoles(previous => Object.fromEntries(rolesArray.map(roleId => [roleId, true])));
+        try {
+          const relatedDocuments = allDocs.filter(item => relatedDocIds.includes(item.id)).map(item => ({ id: item.id, title: item.title, content: toAiText(item.content || '') }));
+          const response = await fetch('/api/generate-understanding', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourceDocument: { id: doc.id, title: doc.title, content: toAiText(doc.content || getSourceDocumentContent()) }, relatedDocuments }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || '生成文档理解底稿失败');
+          understanding = data.understanding;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '生成文档理解底稿失败';
+          setGenerationErrors(previous => Object.fromEntries(rolesArray.map(roleId => [roleId, message])));
+          setLoadingRoles(previous => Object.fromEntries(rolesArray.map(roleId => [roleId, false])));
+          return;
+        }
+      }
+      await Promise.all(rolesArray.map(roleId => generateForRole(roleId, relatedDocIds, understanding)));
+    })();
   };
 
   const selectedDocs = allDocs.filter(d => selectedDocIds.has(d.id));

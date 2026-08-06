@@ -40,7 +40,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: '只支持 POST 请求' });
 
   try {
-    const { sourceDocument, role, relatedDocuments = [] } = req.body || {};
+    const { sourceDocument, role, relatedDocuments = [], understanding = null } = req.body || {};
     if (!sourceDocument?.id || !sourceDocument?.title || !sourceDocument?.content || !role?.id || !role?.name) {
       return json(res, 400, { error: '缺少原始文档或目标角色信息' });
     }
@@ -48,7 +48,13 @@ export default async function handler(req, res) {
     const relatedContext = relatedDocuments.length
       ? relatedDocuments.map((doc) => `- ${doc.title}${doc.content ? `：${doc.content}` : ''}`).join('\n')
       : '无';
-    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n原始文档：\n${sourceDocument.content}\n\n关联资料：\n${relatedContext}\n\n请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:原文中连续出现的精确短句]]。\n- cite 内只能复制原文中连续的 12–60 个字符，不能概括、改写或编造；不要在 cite 外展示原文摘录。\n- 无法在原文中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
+    const factContext = Array.isArray(understanding?.facts) && understanding.facts.length
+      ? understanding.facts.map((fact) => `- ${fact.statement}\n  依据：${fact.evidence.map(item => item.quote).join('；')}`).join('\n')
+      : null;
+    const sourceContext = factContext
+      ? `已完成的文档理解底稿（只能依据以下事实和依据生成）：\n${factContext}`
+      : `原始文档：\n${sourceDocument.content}\n\n关联资料：\n${relatedContext}`;
+    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:原文中连续出现的精确短句]]。\n- cite 内只能复制上方“依据”中连续出现的 12–60 个字符，不能概括、改写或编造；不要在 cite 外展示原文摘录。\n- 无法在原文中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
 
     const kimiResponse = await fetch(process.env.KIMI_API_URL || KIMI_API_URL, {
       method: 'POST',

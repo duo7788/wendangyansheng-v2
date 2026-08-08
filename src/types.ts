@@ -78,3 +78,11 @@ export interface DerivationSnapshot {
   sourceContentHash: string;
   createdAt: string;
 }
+
+export interface GeneratedDerivation {
+  content: string;
+  relatedDocumentIds: string[];
+  generatedAt: string;
+  sourceContentHash?: string | null;
+  visualOverview?: boolean;
+}

@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Directory } from './components/Directory';
 import { Workspace } from './components/Workspace';
-import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot } from './types';
+import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation } from './types';
 import { mockChats as initialMockChats, mockLibraries as initialMockLibraries } from './data';
 
 export const USERS = [
@@ -31,6 +31,7 @@ export default function App() {
   const [activeUserId, setActiveUserId] = useState<string>('u_jobs');
   const [appliedDerivations, setAppliedDerivations] = useState<Record<string, Set<string>>>({});
   const [generatedDerivations, setGeneratedDerivations] = useState<Record<string, Set<string>>>({});
+  const [generatedDerivationContents, setGeneratedDerivationContents] = useState<Record<string, Record<string, GeneratedDerivation>>>({});
   const [derivationSnapshots, setDerivationSnapshots] = useState<DerivationSnapshot[]>([]);
   // Comments are real user-created workspace state.  Do not pre-seed them:
   // a newly opened mock document should look unused.
@@ -131,6 +132,13 @@ export default function App() {
       id: `snapshot_${Date.now()}_${snapshot.roleId}`,
       createdAt: new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
     }]);
+  }, []);
+
+  const handleStoreGeneratedDerivation = useCallback((docId: string, roleId: string, derivation: GeneratedDerivation) => {
+    setGeneratedDerivationContents(previous => ({
+      ...previous,
+      [docId]: { ...(previous[docId] || {}), [roleId]: derivation },
+    }));
   }, []);
 
   const handleAddComment = (comment: Omit<DocComment, 'id' | 'createdAt'>) => {
@@ -258,6 +266,8 @@ export default function App() {
         appliedRoleIds={selectedDocId ? appliedDerivations[selectedDocId] || new Set<string>() : new Set<string>()}
         onApplyDerivation={handleApplyDerivation}
         onGeneratedDerivation={handleGeneratedDerivation}
+        generatedDerivationContents={generatedDerivationContents}
+        onStoreGeneratedDerivation={handleStoreGeneratedDerivation}
         derivationSnapshots={derivationSnapshots}
         onRecordDerivationSnapshot={handleRecordDerivationSnapshot}
         comments={comments}

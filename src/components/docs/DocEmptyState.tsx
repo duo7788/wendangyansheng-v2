@@ -1,5 +1,5 @@
 import { useState, useRef, ChangeEvent } from 'react';
-import { Plus, UploadCloud, FileText, X, Folder } from 'lucide-react';
+import { Plus, UploadCloud, FileText, X, Folder, FolderPlus, Link2, Sparkles, LibraryBig } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as mammoth from 'mammoth';
 import { DocLibrary, DocItem } from '../../types';
@@ -54,10 +54,30 @@ export function DocEmptyState({ libraries, onAddDoc }: DocEmptyStateProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [extractedHtml, setExtractedHtml] = useState<string>('');
+  const [activeEntryIndex, setActiveEntryIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const entryOptions = [
+    { id: 'import-local', title: '导入本地文档', description: '用本地文档资源开始编辑（支持 .doc、.docx）', icon: UploadCloud },
+    { id: 'create-document', title: '新建文档', description: '每新建一个文档，都是一次灵感的迸发', icon: FolderPlus },
+    { id: 'import-feishu', title: '导入飞书文档链接', description: '与飞书能力互通，可对飞书文档进行衍生', icon: Link2 },
+    { id: 'derivation-intro', title: '查看衍生功能介绍', description: '同一份文档，针对不同角色做定制输出，减少协作gap', icon: Sparkles },
+    { id: 'create-library', title: '新建文档库', description: '用库更好地管理文档们', icon: LibraryBig },
+  ];
+  const activeEntry = entryOptions[activeEntryIndex];
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleEntryClick = (index: number) => {
+    if (index !== activeEntryIndex) {
+      setActiveEntryIndex(index);
+      return;
+    }
+
+    if (entryOptions[index].id === 'create-document') setIsCreating(true);
+    if (entryOptions[index].id === 'import-local') handleImportClick();
   };
 
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -108,37 +128,80 @@ export function DocEmptyState({ libraries, onAddDoc }: DocEmptyStateProps) {
   };
 
   return (
-    <div className="flex-1 flex items-center justify-center bg-white relative">
-      <div className="flex flex-col items-center max-w-md text-center">
-        <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 mb-6 border border-blue-100">
-          <FileText size={40} strokeWidth={1.5} />
+    <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-white">
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 1339 554"
+        preserveAspectRatio="xMidYMin meet"
+        className="pointer-events-none absolute left-1/2 top-[59.7%] h-auto w-[min(1339px,100vw)] min-w-[1120px] -translate-x-1/2 text-zinc-400/40"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M1.5 335C86.5 243.167 339.6 60.2999 672 63.4999C1004.4 66.6999 1255.17 240.833 1339 327.5" />
+        <path d="M96.5 252.5H1246.5" />
+        <path d="M672.5 572.36L672.5 64.3601" />
+        <path d="M1 555.86C63.6667 395.027 285.6 71.5602 672 64.3602C1058.4 57.1602 1295.67 416.027 1366 596.36" />
+        <path d="M171 563.36C213.333 402.193 372.8 76.56 672 63.36C971.2 50.16 1165.67 460.86 1225.5 667.86" />
+        <path d="M421.5 562.86C443.167 401.86 523.8 76.5601 673 63.3601C822.2 50.1601 905.833 403.193 929 581.36" />
+        <path d="M0 448.86H1341" />
+      </svg>
+
+      <div className="absolute left-1/2 top-[25.5vh] z-10 flex w-full max-w-6xl -translate-x-1/2 flex-col items-center px-6 text-center">
+        <div className="mb-8">
+          <h2 className="text-[20px] font-semibold tracking-tight text-zinc-950">{activeEntry.title}</h2>
+          <p className="mt-5 text-[15px] font-normal tracking-tight text-zinc-400">{activeEntry.description}</p>
         </div>
-        <h2 className="text-2xl font-semibold text-zinc-900 mb-2">欢迎使用文档</h2>
-        <p className="text-zinc-500 mb-8 leading-relaxed">
-          在这里创建、管理和分享您的知识库。您可以从头开始编写，或导入已有文档。
-        </p>
-        
-        <div className="flex items-center gap-4">
-          <button onClick={() => setIsCreating(true)} className="flex items-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-xl font-medium hover:bg-zinc-800 transition-colors shadow-sm">
-            <Plus size={18} />
-            新建文档
-          </button>
-          
-          <button 
-            onClick={handleImportClick}
-            className="flex items-center gap-2 px-6 py-3 bg-white text-zinc-700 border border-zinc-200 rounded-xl font-medium hover:bg-zinc-50 hover:text-zinc-900 transition-all shadow-sm"
-          >
-            <UploadCloud size={18} />
-            导入文档
-          </button>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileChange}
-            accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            className="hidden" 
-          />
+
+        <div className="relative h-[246px] w-full max-w-[960px]" aria-label="文档入口选择器">
+          {entryOptions.map((option, index) => {
+            let distance = (index - activeEntryIndex + entryOptions.length) % entryOptions.length;
+            if (distance > 2) distance -= entryOptions.length;
+            const placement = {
+              '-2': { x: -422, scale: 0.54, opacity: 0.34, zIndex: 1 },
+              '-1': { x: -248, scale: 0.72, opacity: 0.58, zIndex: 2 },
+              '0': { x: 0, scale: 1, opacity: 1, zIndex: 5 },
+              '1': { x: 248, scale: 0.72, opacity: 0.58, zIndex: 2 },
+              '2': { x: 422, scale: 0.54, opacity: 0.34, zIndex: 1 },
+            }[String(distance) as '-2' | '-1' | '0' | '1' | '2'];
+            const Icon = option.icon;
+            const isActive = distance === 0;
+
+            return <motion.button
+              key={option.title}
+              type="button"
+              aria-pressed={isActive}
+              aria-label={option.title}
+              onClick={() => handleEntryClick(index)}
+              animate={placement}
+              whileHover={{ rotate: -4, y: -5, scale: placement.scale * 1.035 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 26, mass: 0.7 }}
+              style={{ left: 'calc(50% - 115px)', transformOrigin: '50% 50%' }}
+              className="absolute top-8 h-[154px] w-[230px] cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-4"
+            >
+              <svg aria-hidden="true" viewBox="0 0 197 158" preserveAspectRatio="none" className="absolute inset-0 h-full w-full drop-shadow-[0_10px_22px_rgba(24,24,27,0.05)]" fill="white">
+                <path d="M79.1664 1H48H23C10.8497 1 1 10.8497 1 23V135C1 147.15 10.8497 157 23 157H174C186.15 157 196 147.15 196 135V40C196 27.8497 186.15 18 174 18H122.834C119.329 18 115.874 17.1626 112.759 15.5574L89.2414 3.44256C86.1256 1.83744 82.6714 1 79.1664 1Z" stroke="#DADBDC" strokeWidth="2" />
+              </svg>
+              <span className="absolute left-5 right-5 top-[52px] h-px bg-zinc-200" />
+              <span className="absolute bottom-5 left-5 text-[13px] font-medium text-zinc-500">{option.title}</span>
+              <span className="absolute bottom-4 right-5 flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-500"><Icon size={19} strokeWidth={1.6} /></span>
+            </motion.button>;
+          })}
         </div>
+
+        <div className="-mt-2 flex items-center gap-2" aria-label="选择文档入口">
+          {entryOptions.map((option, index) => <button key={option.title} type="button" onClick={() => setActiveEntryIndex(index)} aria-label={`选择${option.title}`} className={`h-1.5 rounded-full transition-all ${index === activeEntryIndex ? 'w-6 bg-zinc-800' : 'w-1.5 bg-zinc-300 hover:bg-zinc-400'}`} />)}
+        </div>
+
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          className="hidden"
+        />
       </div>
 
       <AnimatePresence>

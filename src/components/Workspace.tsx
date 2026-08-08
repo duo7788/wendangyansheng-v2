@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot } from '../types';
+import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation } from '../types';
 import { ChatWorkspace } from './chat/ChatWorkspace';
 import { DocWorkspace } from './docs/DocWorkspace';
 import { DocEmptyState } from './docs/DocEmptyState';
@@ -21,6 +21,8 @@ interface WorkspaceProps {
   appliedRoleIds: Set<string>;
   onApplyDerivation: (docId: string, roleId: string, shouldApply: boolean) => void;
   onGeneratedDerivation: (docId: string, roleId: string) => void;
+  generatedDerivationContents: Record<string, Record<string, GeneratedDerivation>>;
+  onStoreGeneratedDerivation: (docId: string, roleId: string, derivation: GeneratedDerivation) => void;
   derivationSnapshots: DerivationSnapshot[];
   onRecordDerivationSnapshot: (snapshot: Omit<DerivationSnapshot, 'id' | 'createdAt'>) => void;
   comments: DocComment[];
@@ -35,7 +37,7 @@ interface WorkspaceProps {
   setActiveItemId: (id: string | null) => void;
 }
 
-export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onUpdateDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, derivationSnapshots, onRecordDerivationSnapshot, comments, onAddComment, onMarkCommentsRead, onReplyToComment, onResolveComment, onDeleteCommentRecord, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
+export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onUpdateDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, generatedDerivationContents, onStoreGeneratedDerivation, derivationSnapshots, onRecordDerivationSnapshot, comments, onAddComment, onMarkCommentsRead, onReplyToComment, onResolveComment, onDeleteCommentRecord, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
   
   const renderContent = () => {
     if (activeApp === 'tasks') return <TaskWorkspace comments={comments} libraries={libraries} activeUserId={activeUserId} onReply={onReplyToComment} onResolve={onResolveComment} onDelete={onDeleteCommentRecord} />;
@@ -45,7 +47,7 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
       const reviewerRole = reviewMatch[2] === 'u1' ? 'backend' : undefined;
       // A comment is document state.  Review, chat and document-library entry
       // points must therefore pass the exact same document-wide thread set.
-      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={reviewerRole} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} derivationSnapshots={derivationSnapshots.filter(snapshot => snapshot.docId === doc.id)} onRecordDerivationSnapshot={onRecordDerivationSnapshot} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} activeUserId={activeUserId} reviewMode />;
+      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={reviewerRole} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} storedDerivations={generatedDerivationContents[doc.id] || {}} onStoreGeneratedDerivation={onStoreGeneratedDerivation} derivationSnapshots={derivationSnapshots.filter(snapshot => snapshot.docId === doc.id)} onRecordDerivationSnapshot={onRecordDerivationSnapshot} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} onResolveComment={onResolveComment} activeUserId={activeUserId} reviewMode />;
     }
     if (!activeItemId) {
       if (activeApp === 'docs') {
@@ -53,10 +55,31 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
       }
       if (activeApp === 'messages') {
         return (
-          <div className="flex flex-1 flex-col items-center justify-center bg-white text-center">
-            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 text-2xl">☀️</div>
-            <h3 className="text-xl font-semibold tracking-tight text-zinc-900">元气满满地开启一天的工作吧</h3>
-            <p className="mt-2 text-sm text-zinc-500">从左侧选择一个会话，继续和团队协作。</p>
+          <div className="relative flex flex-1 flex-col items-center overflow-hidden bg-white text-center">
+            <div className="relative z-10 pt-[25.5vh]">
+              <h3 className="text-[20px] font-semibold tracking-tight text-zinc-950">元气满满地开启一天的工作吧</h3>
+              <p className="mt-5 text-[15px] font-normal tracking-tight text-zinc-400">左侧快捷入口，方便你与团队沟通、文档协作</p>
+            </div>
+
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 1339 554"
+              preserveAspectRatio="xMidYMin meet"
+              className="pointer-events-none absolute left-1/2 top-[46.3%] h-auto w-[min(1339px,100vw)] min-w-[1120px] -translate-x-1/2 text-zinc-300"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M1.5 335C86.5 243.167 339.6 60.2999 672 63.4999C1004.4 66.6999 1255.17 240.833 1339 327.5" />
+              <path d="M96.5 252.5H1246.5" />
+              <path d="M672.5 572.36L672.5 64.3601" />
+              <path d="M1 555.86C63.6667 395.027 285.6 71.5602 672 64.3602C1058.4 57.1602 1295.67 416.027 1366 596.36" />
+              <path d="M171 563.36C213.333 402.193 372.8 76.56 672 63.36C971.2 50.16 1165.67 460.86 1225.5 667.86" />
+              <path d="M421.5 562.86C443.167 401.86 523.8 76.5601 673 63.3601C822.2 50.1601 905.833 403.193 929 581.36" />
+              <path d="M0 448.86H1341" />
+            </svg>
           </div>
         );
       }
@@ -81,7 +104,7 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
       const [actualDocId, roleId] = activeItemId.split('|');
       const doc = allDocs.find(d => d.id === actualDocId);
       const library = libraries.find(item => item.docs.some(item => item.id === actualDocId));
-      if (doc) return <DocWorkspace doc={doc} libraryName={library?.name} onUpdateDoc={onUpdateDoc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={initialDerivativeRole || roleId} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} derivationSnapshots={derivationSnapshots.filter(snapshot => snapshot.docId === doc.id)} onRecordDerivationSnapshot={onRecordDerivationSnapshot} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} activeUserId={activeUserId} />;
+      if (doc) return <DocWorkspace doc={doc} libraryName={library?.name} onUpdateDoc={onUpdateDoc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={initialDerivativeRole || roleId} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} storedDerivations={generatedDerivationContents[doc.id] || {}} onStoreGeneratedDerivation={onStoreGeneratedDerivation} derivationSnapshots={derivationSnapshots.filter(snapshot => snapshot.docId === doc.id)} onRecordDerivationSnapshot={onRecordDerivationSnapshot} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} onResolveComment={onResolveComment} activeUserId={activeUserId} />;
     }
 
     return (

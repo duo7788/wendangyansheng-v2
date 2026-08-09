@@ -6,6 +6,12 @@ import { DocEmptyState } from './docs/DocEmptyState';
 import { Inbox, PanelLeftOpen } from 'lucide-react';
 import { TaskWorkspace } from './tasks/TaskWorkspace';
 
+const ROLE_BY_USER_ID: Record<string, string> = {
+  u1: 'backend',
+  u2: 'frontend',
+  u4: 'qa',
+};
+
 interface WorkspaceProps {
   activeApp: AppIdentifier;
   activeItemId: string | null;
@@ -48,10 +54,21 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
     const reviewMatch = activeItemId?.match(/^review:([^:]+):([^:]+)$/);
     if (activeApp === 'messages' && reviewMatch) {
       const doc = libraries.flatMap(library => library.docs).find(item => item.id === reviewMatch[1]);
-      const reviewerRole = reviewMatch[2] === 'u1' ? 'backend' : undefined;
+      const reviewerRole = ROLE_BY_USER_ID[reviewMatch[2]];
+      // A shared original stays an original. Only expose a role view when the
+      // owner has generated it, applied it, and shared this document with the
+      // receiving role. A comment notification alone must never unlock it.
+      const canOpenRoleView = Boolean(reviewerRole &&
+        appliedRoleIds.has(reviewerRole) &&
+        generatedDerivationContents[reviewMatch[1]]?.[reviewerRole] &&
+        chats.some(chat => chat.messages?.some(message =>
+          message.type === 'shared_doc' &&
+          message.docId === reviewMatch[1] &&
+          message.recipientId === reviewMatch[2]
+        )));
       // A comment is document state.  Review, chat and document-library entry
       // points must therefore pass the exact same document-wide thread set.
-      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={reviewerRole} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} storedDerivations={generatedDerivationContents[doc.id] || {}} onStoreGeneratedDerivation={onStoreGeneratedDerivation} derivationSnapshots={derivationSnapshots.filter(snapshot => snapshot.docId === doc.id)} onRecordDerivationSnapshot={onRecordDerivationSnapshot} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} onResolveComment={onResolveComment} activeUserId={activeUserId} onAddChallengeTask={onAddChallengeTask} reviewMode />;
+      if (doc) return <DocWorkspace doc={doc} libraries={libraries} chats={chats} onShareDoc={onShareDoc} isDirCollapsed={isDirCollapsed} setIsDirCollapsed={setIsDirCollapsed} initialRoleId={canOpenRoleView ? reviewerRole : undefined} appliedRoleIds={appliedRoleIds} onApplyDerivation={onApplyDerivation} onGeneratedDerivation={onGeneratedDerivation} storedDerivations={generatedDerivationContents[doc.id] || {}} onStoreGeneratedDerivation={onStoreGeneratedDerivation} derivationSnapshots={derivationSnapshots.filter(snapshot => snapshot.docId === doc.id)} onRecordDerivationSnapshot={onRecordDerivationSnapshot} canManageDerivations={activeUserId === 'u_jobs'} comments={comments.filter(comment => comment.docId === doc.id)} onAddComment={onAddComment} onResolveComment={onResolveComment} activeUserId={activeUserId} onAddChallengeTask={onAddChallengeTask} reviewMode />;
     }
     if (!activeItemId) {
       if (activeApp === 'docs') {

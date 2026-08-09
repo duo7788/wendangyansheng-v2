@@ -299,13 +299,17 @@ export default function App() {
     ? activeItemId.split(':')[1]
     : activeItemId?.split('|')[0];
   // A role view is intentionally not exposed merely because it exists. The
-  // matching member must have received a document link in their own thread.
+  // matching member must have received the document, and the owner must have
+  // both generated and applied that exact role view.
   const hasReceivedDocumentLink = Boolean(selectedDocId && chats.some(chat =>
     chat.messages?.some(message =>
       message.type === 'shared_doc' && message.docId === selectedDocId && message.recipientId === activeUserId
     )
   ));
-  const initialDerivativeRole = activeApp === 'docs' && selectedDocId && currentUserRole && hasReceivedDocumentLink && appliedDerivations[selectedDocId]?.has(currentUserRole)
+  const hasGeneratedAndAppliedRole = Boolean(selectedDocId && currentUserRole &&
+    generatedDerivations[selectedDocId]?.has(currentUserRole) &&
+    appliedDerivations[selectedDocId]?.has(currentUserRole));
+  const initialDerivativeRole = activeApp === 'docs' && selectedDocId && currentUserRole && hasReceivedDocumentLink && hasGeneratedAndAppliedRole
     ? currentUserRole
     : null;
 

@@ -1582,7 +1582,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
             ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed font-normal">
                 <p className="outline-none" contentEditable suppressContentEditableWarning>
-                  本文档作为项目的唯一事实来源。请确保在周五的站会之前，所有更新都已与相应的设计资产同步。
+                  {highlightOriginalPhrase('本文档作为项目的唯一事实来源。请确保在周五的站会之前，所有更新都已与相应的设计资产同步。')}
                 </p>
 
                 <h3 className="text-lg font-semibold text-zinc-900 mt-12 mb-4 outline-none" contentEditable suppressContentEditableWarning>

@@ -154,12 +154,18 @@ const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick
   return rendered;
 };
 
-const RenderedDerivation = ({ content, sourceText, citationSourceTexts, citationNumbers, activeCitation, onCitationClick, onRevealOriginal }: { content: string; sourceText: string; citationSourceTexts?: Record<string, string>; citationNumbers?: Record<string, number>; activeCitation: InlineCitation | null; onCitationClick: (citation: InlineCitation) => void; onRevealOriginal: () => void }) => {
+const derivationTitle = (content: string, fallback: string) => {
+  const match = content.match(/^#\s+(.+)$/m);
+  return match?.[1].trim() || fallback;
+};
+
+const RenderedDerivation = ({ content, hideLeadingTitle = false, sourceText, citationSourceTexts, citationNumbers, activeCitation, onCitationClick, onRevealOriginal }: { content: string; hideLeadingTitle?: boolean; sourceText: string; citationSourceTexts?: Record<string, string>; citationNumbers?: Record<string, number>; activeCitation: InlineCitation | null; onCitationClick: (citation: InlineCitation) => void; onRevealOriginal: () => void }) => {
   const lines = content.replace(/\r\n/g, '\n').split('\n');
   // Old saved generations may still include the former appendix. Hide it so
   // they do not contradict the new inline-citation experience.
   const legacyEvidenceIndex = lines.findIndex(line => /^#{1,3}\s*原文依据\s*$/.test(line.trim()));
-  const visibleLines = legacyEvidenceIndex === -1 ? lines : lines.slice(0, legacyEvidenceIndex);
+  const visibleLines = (legacyEvidenceIndex === -1 ? lines : lines.slice(0, legacyEvidenceIndex));
+  if (hideLeadingTitle && /^#\s+/.test(visibleLines[0]?.trim() || '')) visibleLines.splice(0, 1);
   return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(visibleLines, 'line', onCitationClick, activeCitation?.id, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers)}</article>;
 };
 
@@ -735,21 +741,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         data = {};
       }
       if (!response.ok || !data.derivation) {
-        // The local Vite preview intentionally has no serverless AI endpoint.
-        // Keep the complete interaction testable with an honest, visible mock.
-        const sourceHash = await hashSourceText(sourceTextForAi);
-        const sourceSummary = sourceTextForAi.replace(/\s+/g, ' ').slice(0, 110);
-        const relatedContext = relatedDocuments.length
-          ? `\n\n## 关联文档要点\n${relatedDocuments.map((item, index) => { const excerpt = item.content.replace(/\s+/g, ' ').slice(0, 100) || '待补充内容'; return `- ${item.title}：${excerpt} [[cite:${item.id}|${excerpt}]]`; }).join('\n')}`
-          : '';
-        data = {
-          derivation: {
-            content: `# ${role.name} 工作视图\n\n## 这份文档是什么\n${doc.title} 的角色化执行摘要，供 ${role.name} 快速了解背景、边界和需要落实的事项。\n\n## 你需要做什么\n- 核对与本角色相关的目标、风险和依赖项。\n- 将不确定项整理为可追踪的问题并在文档中评论。\n- 在开始执行前，与上下游角色确认交付边界。\n\n## 主文档关键上下文\n${sourceSummary} [[cite:${doc.id}|${sourceSummary}]]${relatedContext}\n\n## 行动清单\n- [ ] 确认当前阶段的负责人和验收标准\n- [ ] 标记需要补充的输入或接口信息\n- [ ] 在下一次同步前更新执行状态`,
-            related_document_ids: relatedDocIds,
-            source_content_hash: sourceHash,
-            updated_at: new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-          },
-        };
+        throw new Error(data.error || 'AI 衍生生成失败，请检查服务配置后重试');
       }
       const derivation: GeneratedDerivation = {
         content: data.derivation.content,
@@ -1460,7 +1452,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 </span>
               </div>
               <h1 className="text-3xl font-bold text-zinc-900 tracking-tight mb-8">
-                {doc.title}
+                {viewingDerivation?.relatedDocumentIds.length ? derivationTitle(viewingDerivation.content, '联合工作视图') : doc.title}
               </h1>
               
               {generatedDerivations[viewingDerivativeRole] ? (
@@ -1469,7 +1461,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                     <button role="tab" aria-selected={derivativePackageTab === 'overview'} onClick={() => setDerivativePackageTab('overview')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'overview' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'overview' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">项目速览</span></button>
                     <button role="tab" aria-selected={derivativePackageTab === 'document'} onClick={() => setDerivativePackageTab('document')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'document' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'document' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">角色文档</span></button>
                   </div>}
-                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverview ? <ProjectOverview title={doc.title} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
+                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverview ? <ProjectOverview title={viewingDerivation?.relatedDocumentIds.length ? derivationTitle(viewingDerivation.content, '联合工作视图') : doc.title} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} hideLeadingTitle={Boolean(viewingDerivation?.relatedDocumentIds.length)} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
                 </>
               ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed">

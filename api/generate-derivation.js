@@ -94,7 +94,11 @@ export default async function handler(req, res) {
     const sourceContext = factContext
       ? `已完成的文档理解底稿（只能依据以下事实和依据生成）：\n${factContext}\n\n引用来源文档：\n${sourceMaterial}`
       : `来源文档：\n${sourceMaterial}`;
-    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:文档ID|原文中连续出现的精确短句]]。\n- 文档ID 必须逐字使用来源文档中的“文档 ID”；短句必须逐字连续出现于该 ID 对应的文档，长度 12–60 个字符。\n- 不能概括、改写或编造 cite 内容；不要在 cite 外展示原文摘录。\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
+    const hasRelatedSource = citationSources.length > 1;
+    const headingRequirements = hasRelatedSource
+      ? `请使用 Markdown，并严格按以下标题组织：\n# 联合工作标题\n## ${role.name}工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n标题规则：\n- “联合工作标题”必须是 6–18 个中文字符的主题概括，提炼多篇文档共同要解决的业务或研发事项。\n- 不得把文档标题直接拼接、不得使用加号、不得照抄任一文档标题、不得包含角色名称。`
+      : `请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项`;
+    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n${headingRequirements}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:文档ID|原文中连续出现的精确短句]]。\n- 文档ID 必须逐字使用来源文档中的“文档 ID”；短句必须逐字连续出现于该 ID 对应的文档，长度 12–60 个字符。\n- 不能概括、改写或编造 cite 内容；不要在 cite 外展示原文摘录。\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
 
     const model = process.env.KIMI_MODEL || 'kimi-k2.5';
     // The production Kimi endpoint currently requires temperature 0.6 for

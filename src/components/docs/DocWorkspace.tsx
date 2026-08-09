@@ -27,6 +27,7 @@ type MentionMenu = {
 };
 
 type ChallengeMessage = { role: { id: string; name: string }; content: string; isConflict?: boolean };
+type SourceImage = { id: string; src: string; alt: string };
 
 // The current prototype keeps its source document in the editor markup rather
 // than a database.  This supplies that same source to Kimi until document
@@ -50,6 +51,15 @@ const toAiText = (content: string, maxLength = 30000) => {
     .filter(Boolean);
   const plainText = blocks.length ? blocks.join('\n') : (parsed.body.textContent || content);
   return plainText.replace(/\n{3,}/g, '\n\n').trim().slice(0, maxLength);
+};
+
+const sourceImagesFromContent = (content: string): SourceImage[] => {
+  const parsed = new DOMParser().parseFromString(content, 'text/html');
+  return Array.from(parsed.images).flatMap((image, index) => {
+    const src = image.currentSrc || image.getAttribute('src') || '';
+    if (!src) return [];
+    return [{ id: `source-image-${index + 1}`, src, alt: image.getAttribute('alt') || `原文图片 ${index + 1}` }];
+  });
 };
 
 const hashSourceText = async (content: string) => {
@@ -97,6 +107,11 @@ const HistoryLogicTag = ({ source }: { source: string; key?: string }) => {
   </span>;
 };
 
+const DerivationImage = ({ image }: { image: SourceImage; key?: string }) => <figure className="my-6 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
+  <img src={image.src} alt={image.alt} className="max-h-[420px] w-full object-contain" loading="lazy" />
+  {image.alt && <figcaption className="border-t border-zinc-100 bg-white px-3 py-2 text-xs text-zinc-500">{image.alt}</figcaption>}
+</figure>;
+
 const renderInlineMarkdown = (text: string, keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '', citationSourceTexts: Record<string, string> = {}, citationNumbers: Record<string, number> = {}): ReactNode[] => {
   const tokens = text.split(/(\[\[cite:[\s\S]*?\]\]|\[\[history:[^\]]+\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
   return tokens.map((token, index) => {
@@ -120,12 +135,23 @@ const renderInlineMarkdown = (text: string, keyPrefix: string, onCitationClick?:
 const isTableSeparator = (line: string) => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
 const splitTableRow = (line: string) => line.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim());
 
-const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '', citationSourceTexts: Record<string, string> = {}, citationNumbers: Record<string, number> = {}, historySources: string[] = []) => {
+const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '', citationSourceTexts: Record<string, string> = {}, citationNumbers: Record<string, number> = {}, historySources: string[] = [], sourceImages: SourceImage[] = []) => {
   const rendered: ReactNode[] = [];
   let nextHistorySource = 0;
+  let fallbackImageIndex = 0;
+  let hasSeenLargeHeading = false;
+  const imageById = new Map(sourceImages.map(image => [image.id, image]));
+  const placedImageIds = new Set(lines.flatMap(line => [...line.matchAll(/^\s*\[\[image:([^\]]+)\]\]\s*$/g)].map(match => match[1].trim())).filter(id => imageById.has(id)));
+  const fallbackImages = sourceImages.filter(image => !placedImageIds.has(image.id));
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     const key = `${keyPrefix}-${index}`;
+    const imageMarker = line.match(/^\s*\[\[image:([^\]]+)\]\]\s*$/);
+    if (imageMarker) {
+      const image = imageById.get(imageMarker[1].trim());
+      if (image) rendered.push(<DerivationImage key={`${key}-image`} image={image} />);
+      continue;
+    }
     if (line.includes('|') && isTableSeparator(lines[index + 1] || '')) {
       const headers = splitTableRow(line);
       const rows: string[][] = [];
@@ -146,6 +172,8 @@ const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick
   if (heading) {
     const level = heading[1].length;
     const className = level === 1 ? 'mt-2 text-2xl font-bold tracking-tight text-zinc-900' : level === 2 ? 'mt-9 text-xl font-semibold text-zinc-900' : 'mt-6 text-base font-semibold text-zinc-900';
+    if (level === 2 && hasSeenLargeHeading && fallbackImages[fallbackImageIndex]) rendered.push(<DerivationImage key={`${key}-fallback-image`} image={fallbackImages[fallbackImageIndex++]} />);
+    if (level === 2) hasSeenLargeHeading = true;
     const historySource = level === 2 ? historySources[nextHistorySource++] : undefined;
     rendered.push(<h2 key={key} className={`${className} flex items-center gap-3`}>{renderInlineMarkdown(heading[2], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers)}{historySource && <HistoryLogicTag source={historySource} />}</h2>);
     continue;
@@ -167,6 +195,7 @@ const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick
   }
   rendered.push(<p key={key}>{renderInlineMarkdown(line, key, onCitationClick, activeCitationId, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers)}</p>);
   }
+  while (fallbackImages[fallbackImageIndex]) rendered.push(<DerivationImage key={`${keyPrefix}-tail-image-${fallbackImageIndex}`} image={fallbackImages[fallbackImageIndex++]} />);
   return rendered;
 };
 
@@ -175,7 +204,7 @@ const derivationTitle = (content: string, fallback: string) => {
   return match?.[1].trim() || fallback;
 };
 
-const RenderedDerivation = ({ content, hideLeadingTitle = false, sourceText, citationSourceTexts, citationNumbers, activeCitation, onCitationClick, onRevealOriginal }: { content: string; hideLeadingTitle?: boolean; sourceText: string; citationSourceTexts?: Record<string, string>; citationNumbers?: Record<string, number>; activeCitation: InlineCitation | null; onCitationClick: (citation: InlineCitation) => void; onRevealOriginal: () => void }) => {
+const RenderedDerivation = ({ content, hideLeadingTitle = false, sourceText, citationSourceTexts, citationNumbers, sourceImages = [], activeCitation, onCitationClick, onRevealOriginal }: { content: string; hideLeadingTitle?: boolean; sourceText: string; citationSourceTexts?: Record<string, string>; citationNumbers?: Record<string, number>; sourceImages?: SourceImage[]; activeCitation: InlineCitation | null; onCitationClick: (citation: InlineCitation) => void; onRevealOriginal: () => void }) => {
   const lines = content.replace(/\r\n/g, '\n').split('\n');
   // Old saved generations may still include the former appendix. Hide it so
   // they do not contradict the new inline-citation experience.
@@ -184,7 +213,7 @@ const RenderedDerivation = ({ content, hideLeadingTitle = false, sourceText, cit
   const historySources = [...content.matchAll(/\[\[history:([^\]]+)\]\]/g)].map(match => match[1].trim());
   const contentWithoutHistoryMarkers = visibleLines.map(line => line.replace(/\s*\[\[history:[^\]]+\]\]/g, ''));
   if (hideLeadingTitle && /^#\s+/.test(contentWithoutHistoryMarkers[0]?.trim() || '')) contentWithoutHistoryMarkers.splice(0, 1);
-  return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(contentWithoutHistoryMarkers, 'line', onCitationClick, activeCitation?.id, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers, historySources)}</article>;
+  return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(contentWithoutHistoryMarkers, 'line', onCitationClick, activeCitation?.id, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers, historySources, sourceImages)}</article>;
 };
 
 const MindMapOverview = ({ overview, roleName }: { overview: VisualOverview; roleName: string }) => {
@@ -485,6 +514,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   // The model receives plain text, so this same normalised value is the
   // version identity for both generation and later change detection.
   const sourceTextForAi = toAiText(`${doc.title}\n${doc.content || getSourceDocumentContent()}`);
+  const sourceImages = sourceImagesFromContent(doc.content || '');
   useEffect(() => {
     let cancelled = false;
     void hashSourceText(sourceTextForAi).then(hash => {
@@ -834,6 +864,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           sourceDocument: { id: doc.id, title: doc.title, content: toAiText(doc.content || getSourceDocumentContent()) },
           role: { id: role.id, name: role.name },
           relatedDocuments,
+          sourceImages,
           ...(existingContent ? { existingContent } : {}),
         }),
         signal: controller.signal,
@@ -1616,7 +1647,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                     <button role="tab" aria-selected={derivativePackageTab === 'overview'} onClick={() => setDerivativePackageTab('overview')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'overview' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'overview' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">项目速览</span></button>
                     <button role="tab" aria-selected={derivativePackageTab === 'document'} onClick={() => setDerivativePackageTab('document')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'document' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'document' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">角色文档</span></button>
                   </div>}
-                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverviewData ? <MindMapOverview overview={generatedDerivations[viewingDerivativeRole].visualOverviewData} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} hideLeadingTitle={Boolean(viewingDerivation?.relatedDocumentIds.length)} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
+                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverviewData ? <MindMapOverview overview={generatedDerivations[viewingDerivativeRole].visualOverviewData} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} hideLeadingTitle={Boolean(viewingDerivation?.relatedDocumentIds.length)} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} sourceImages={sourceImages} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
                 </>
               ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed">
@@ -1929,7 +1960,8 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               </div>
 
               <div className="mb-6">
-                <div className="mb-3 flex items-baseline justify-between gap-3"><h4 className="text-sm font-medium text-zinc-900">关联文档</h4><span className="text-xs text-zinc-400">主文档 + 1 篇关联文档</span></div>
+                <div className="mb-1 flex items-baseline justify-between gap-3"><h4 className="text-sm font-medium text-zinc-900">联合生成资料（可选）</h4><span className="text-xs text-zinc-400">主文档 + {selectedDocs.length} 篇关联文档</span></div>
+                <p className="mb-3 text-xs leading-relaxed text-zinc-500">所选文档会与主文档共同生成适配不同角色的协作视图。</p>
                 
                 <div aria-disabled="true" className="mb-3 flex cursor-not-allowed items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-400">
                   <Sparkles size={14} className="shrink-0 text-indigo-500" />

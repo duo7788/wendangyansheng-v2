@@ -131,12 +131,16 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: '只支持 POST 请求' });
 
   try {
-    const { sourceDocument, role, relatedDocuments = [], understanding = null, existingContent = null } = req.body || {};
+    const { sourceDocument, role, relatedDocuments = [], sourceImages = [], understanding = null, existingContent = null } = req.body || {};
     if (!sourceDocument?.id || !sourceDocument?.title || !sourceDocument?.content || !role?.id || !role?.name) {
       return json(res, 400, { error: '缺少原始文档或目标角色信息' });
     }
 
     const citationSources = sourceDocumentsForCitation(sourceDocument, relatedDocuments);
+    const images = Array.isArray(sourceImages) ? sourceImages.slice(0, 12).flatMap((image, index) => {
+      if (!image?.src || typeof image.alt !== 'string') return [];
+      return [{ id: typeof image.id === 'string' ? image.id : `source-image-${index + 1}`, alt: image.alt.trim() || `原文图片 ${index + 1}` }];
+    }) : [];
     const hasRelatedSource = citationSources.length > 1;
     const isCitationRepair = typeof existingContent === 'string' && existingContent.trim().length > 0;
     const useBlockCitations = hasRelatedSource || isCitationRepair;
@@ -166,7 +170,10 @@ export default async function handler(req, res) {
     const historyLogicInstruction = isCitationRepair
       ? `- 保留已有的 [[history:...]] 历史逻辑标记，不要增加、删除或改写它们。`
       : `- 在全文中恰好插入 2 个 [[history:代码路径]] 标记。它们必须附在 ${role.name} 需要额外关注的独立提醒句末尾，不能附在任何原文结论、行动项或原文引用后；这两句用于模拟该角色从历史代码库发现的既有处理约束，不是原文信息，也不需要 cite 引用。代码路径必须是看起来真实的 legacy/ 模块路径，例如 [[history:legacy/entitlements/priority-policy.ts]]。不要解释标记，也不要在同一句放置 cite 和 history 标记。`;
-    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」完成以下工作：\n\n${taskInstruction}\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n${citationRequirements}\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n历史逻辑规则：\n${historyLogicInstruction}\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
+    const imageInstruction = isCitationRepair
+      ? `- 保留已有的 [[image:...]] 图片标记，不要增加、删除或改写它们。`
+      : images.length ? `- 原文图片必须全部保留在衍生文档中。图片清单：\n${images.map(image => `  - ${image.id}：${image.alt}`).join('\n')}\n- 为每张图片各输出一次独占一行的 [[image:图片ID]] 标记，放在与图片含义最相关的段落之后；图片标记不是引用，不要添加 cite，也不要解释它。` : `- 原文没有图片，不要输出 [[image:...]] 标记。`;
+    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」完成以下工作：\n\n${taskInstruction}\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n${citationRequirements}\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n图片规则：\n${imageInstruction}\n\n历史逻辑规则：\n${historyLogicInstruction}\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
 
     const model = process.env.KIMI_MODEL || 'kimi-k2.5';
     // The production Kimi endpoint currently requires temperature 0.6 for

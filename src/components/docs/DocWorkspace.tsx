@@ -1,4 +1,4 @@
-import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, PanelLeftOpen, Plus, Eye, MessageCircle, AtSign, ChevronLeft, ChevronRight, PenLine, PanelsTopLeft } from 'lucide-react';
+import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, PanelLeftOpen, Plus, Eye, MessageCircle, AtSign, ChevronLeft, ChevronRight, PenLine } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DocItem, DocLibrary, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation, ChallengeTask } from '../../types';
@@ -219,7 +219,7 @@ interface DocWorkspaceProps {
   onUpdateDoc?: (docId: string, patch: Partial<DocItem>) => void;
   libraries: DocLibrary[];
   chats: ChatItem[];
-  onShareDoc: (chatId: string, doc: DocItem, roleId?: string | null) => void;
+  onShareDoc: (chatIds: string[], doc: DocItem) => void;
   isDirCollapsed: boolean;
   setIsDirCollapsed: (collapsed: boolean) => void;
   initialRoleId?: string | null;
@@ -283,6 +283,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [highlightedCitation, setHighlightedCitation] = useState<string | null>(null);
   const [citationPreview, setCitationPreview] = useState<'1' | '2' | null>(null);
   const [inlineCitationPreview, setInlineCitationPreview] = useState<InlineCitation | null>(null);
+  const [pendingInlineCitation, setPendingInlineCitation] = useState<InlineCitation | null>(null);
   // Recipients with an applied role open their dedicated view. Everyone else
   // opens the original document rather than an empty workspace.
   const [showOriginal, setShowOriginal] = useState(canManageDerivations || !initialRoleId);
@@ -571,7 +572,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [newRoleSkill, setNewRoleSkill] = useState('');
 
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [selectedShareChatId, setSelectedShareChatId] = useState<string | null>(null);
+  const [selectedShareChatIds, setSelectedShareChatIds] = useState<Set<string>>(new Set());
 
   const toggleRoleSelection = (id: string) => {
     setSelectedRoleIds(prev => {
@@ -1031,18 +1032,36 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   };
   const openInlineCitation = (citation: InlineCitation) => {
     setInlineCitationPreview(null);
-    if (citation.sourceDocumentId) setActiveSourceDocumentId(citation.sourceDocumentId);
+    if (citation.sourceDocumentId && !sourceDocuments.some(source => source.id === citation.sourceDocumentId)) {
+      showToast('关联文档未加载，无法定位该引用');
+      return;
+    }
     setShowOriginal(true);
-    // Wait for the left source panel to finish switching before locating the
-    // exact cited sentence. The role document itself never leaves view.
-    window.setTimeout(() => flashInlineOriginal(citation.quote), 300);
+    setPendingInlineCitation(citation);
+    if (citation.sourceDocumentId) setActiveSourceDocumentId(citation.sourceDocumentId);
   };
   const revealInlineOriginal = () => {
     const citation = inlineCitationPreview;
     setInlineCitationPreview(null);
     setShowOriginal(true);
-    if (citation) window.setTimeout(() => flashInlineOriginal(citation.quote), 280);
+    if (citation) {
+      setPendingInlineCitation(citation);
+      if (citation.sourceDocumentId) setActiveSourceDocumentId(citation.sourceDocumentId);
+    }
   };
+  // Wait for React to commit the selected source document before searching its
+  // DOM. A fixed timeout was unreliable for larger associated documents.
+  useEffect(() => {
+    if (!pendingInlineCitation || !showOriginal) return;
+    if (pendingInlineCitation.sourceDocumentId && pendingInlineCitation.sourceDocumentId !== activeSourceDocumentId) return;
+    const frameId = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        flashInlineOriginal(pendingInlineCitation.quote);
+        setPendingInlineCitation(null);
+      });
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [pendingInlineCitation, activeSourceDocumentId, showOriginal]);
   const placeCommentAnchor = (selectedText: string, rect: DOMRect, citationId?: '1' | '2', sourceText = selectedText) => {
     setCommentAnchor({
       citationId,
@@ -1616,7 +1635,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                       </svg>
                       {isComplete && <div className="absolute inset-y-0 right-0 w-[142px] [clip-path:polygon(100%_6%,28%_22%,20%_31%,40%_100%,100%_100%)]"><div className="absolute -right-2 top-[50px] w-[112px] -rotate-[16deg] space-y-3 opacity-70"><span className="block h-3 rounded-sm bg-zinc-100" /><span className="block h-3 w-[84%] rounded-sm bg-zinc-100" /></div></div>}
                     </div>
-                    <div className={`relative flex flex-col ${isLoading ? 'min-h-[208px]' : isComplete ? (hasRelatedDocs ? 'min-h-[166px]' : 'min-h-[132px]') : 'min-h-[166px]'}`}>
+                    <div className={`relative flex flex-col ${isLoading ? 'min-h-[160px]' : isComplete ? (hasRelatedDocs ? 'min-h-[166px]' : 'min-h-[132px]') : 'min-h-[166px]'}`}>
                       <div className="flex items-center gap-2.5">
                         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 text-zinc-500"><User size={16} strokeWidth={1.8} /></span>
                         <span className="text-sm font-semibold text-zinc-900">{role?.name}</span>
@@ -1630,11 +1649,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                         })}
                       </div>}
 
-                      {isLoading ? <div className="mt-4 space-y-2 text-xs leading-4">
-                        <p className="flex items-center gap-1.5 text-zinc-400"><MessageCircle size={14} fill="currentColor" strokeWidth={0} />大模型思考已完成</p>
-                        <p className="flex items-center gap-1.5 font-medium text-zinc-950"><PenLine size={14} />衍生文档撰写中……</p>
-                        <p className="flex items-center gap-1.5 text-zinc-400"><PanelsTopLeft size={14} />制作衍生卡片中……</p>
-                      </div> : isComplete ? <p className="mt-4 flex items-center gap-1.5 text-xs text-zinc-400"><Check size={14} />衍生文档已完成</p> : <p className="mt-4 text-xs text-zinc-400">{isCancelled ? '生成已停止，可重新生成。' : '等待生成衍生文档。'}</p>}
+                      {isLoading ? <p className="mt-4 flex items-center gap-1.5 text-xs font-medium text-zinc-950"><PenLine size={14} />衍生文档撰写中……</p> : isComplete ? <p className="mt-4 flex items-center gap-1.5 text-xs text-zinc-400"><Check size={14} />衍生文档已完成</p> : <p className="mt-4 text-xs text-zinc-400">{isCancelled ? '生成已停止，可重新生成。' : '等待生成衍生文档。'}</p>}
 
                       <div className="mt-auto pt-2">
                         {generationErrors[roleId] && <p className="mb-3 rounded-lg bg-rose-50 p-2 text-xs leading-relaxed text-rose-700">{generationErrors[roleId]}</p>}
@@ -1907,7 +1922,8 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                <div className="flex items-center justify-between mb-6 shrink-0">
                  <h3 className="text-lg font-semibold text-zinc-900">分享文档到会话</h3>
                  <button 
-                   onClick={() => setIsShareModalOpen(false)}
+                   onClick={() => { setIsShareModalOpen(false); setSelectedShareChatIds(new Set()); }}
+                   aria-label="关闭分享窗口"
                    className="text-zinc-400 hover:text-zinc-600 p-1 rounded-md hover:bg-zinc-100 transition-colors"
                  >
                    <X size={20} />
@@ -1917,21 +1933,26 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                <div className="flex-1 overflow-y-auto min-h-0 -mx-6 px-6">
                  <div className="space-y-1">
                    {chats.map(chat => {
-                     const isSelected = selectedShareChatId === chat.id;
+                     const isSelected = selectedShareChatIds.has(chat.id);
                      return (
                        <button
                          key={chat.id}
-                         onClick={() => setSelectedShareChatId(chat.id)}
-                         className={`w-full flex items-center justify-between p-3 rounded-xl transition-colors ${
+                         onClick={() => setSelectedShareChatIds(previous => {
+                           const next = new Set(previous);
+                           if (next.has(chat.id)) next.delete(chat.id); else next.add(chat.id);
+                           return next;
+                         })}
+                         aria-pressed={isSelected}
+                         className={`w-full flex items-center justify-between p-3 rounded-xl border transition-colors ${
                            isSelected 
-                             ? 'bg-indigo-50/50' 
-                             : 'hover:bg-zinc-50'
+                             ? 'border-zinc-300 bg-zinc-100 text-zinc-950 shadow-sm'
+                             : 'border-transparent hover:bg-zinc-50'
                          }`}
                        >
                          <div className="flex items-center gap-3">
                            <img src={chat.user.avatar} alt={chat.user.name} className="w-8 h-8 rounded-full object-cover shrink-0" />
                            <div className="text-left">
-                             <div className={`text-sm ${isSelected ? 'font-medium text-indigo-900' : 'font-medium text-zinc-900'}`}>
+                             <div className={`text-sm ${isSelected ? 'font-semibold text-zinc-950' : 'font-medium text-zinc-900'}`}>
                                {chat.user.name}
                              </div>
                              <div className="text-xs text-zinc-500 truncate max-w-[180px]">
@@ -1939,7 +1960,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                              </div>
                            </div>
                          </div>
-                         {isSelected && <Check size={16} className="text-indigo-600 shrink-0" />}
+                         {isSelected && <Check size={16} strokeWidth={2.5} className="shrink-0 text-zinc-900" />}
                        </button>
                      );
                    })}
@@ -1948,23 +1969,23 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
 
                <div className="flex justify-end gap-3 shrink-0 mt-6 pt-4 border-t border-zinc-100">
                   <button 
-                    onClick={() => setIsShareModalOpen(false)}
+                    onClick={() => { setIsShareModalOpen(false); setSelectedShareChatIds(new Set()); }}
                     className="px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
                   >
                     取消
                   </button>
                   <button 
                     onClick={() => {
-                      if (selectedShareChatId) {
-                        onShareDoc(selectedShareChatId, doc);
+                      if (selectedShareChatIds.size) {
+                        onShareDoc(Array.from(selectedShareChatIds), doc);
                         setIsShareModalOpen(false);
-                        setSelectedShareChatId(null);
+                        setSelectedShareChatIds(new Set());
                       }
                     }}
-                    disabled={!selectedShareChatId}
-                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                    disabled={!selectedShareChatIds.size}
+                    className="min-w-28 px-5 py-2 bg-zinc-950 hover:bg-zinc-800 disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold transition-colors shadow-sm"
                   >
-                    发送
+                    {selectedShareChatIds.size ? `发送给 ${selectedShareChatIds.size} 个会话` : '发送'}
                   </button>
                </div>
              </motion.div>

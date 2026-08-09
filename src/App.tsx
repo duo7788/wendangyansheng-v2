@@ -94,32 +94,35 @@ export default function App() {
     setChallengeTasks(previous => previous.map(task => task.id === taskId ? { ...task, unread: false, status: 'resolved' } : task));
   }, []);
 
-  const handleShareDoc = (chatId: string, doc: DocItem) => {
-    const recipientId = chats.find(chat => chat.id === chatId)?.user.id;
-    if (!recipientId || recipientId === activeUserId) return;
-    const participantIds = [activeUserId, recipientId].sort();
-    const existingDirectChat = chats.find(chat => (chat.participantIds || ['u_jobs', chat.user.id]).slice().sort().join(':') === participantIds.join(':'));
-    const targetChatId = existingDirectChat?.id || `direct-${participantIds.join('-')}`;
+  const handleShareDoc = (chatIds: string[], doc: DocItem) => {
+    const selectedChats = chats.filter(chat => chatIds.includes(chat.id) && chat.user.id !== activeUserId);
+    if (!selectedChats.length) return;
     setChats(prev => {
-      const message = {
-            id: 'm_' + Date.now(),
-            senderId: activeUserId,
-            content: '我分享了一个文档给你，请查看。',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            type: 'shared_doc',
-            docId: doc.id,
-            docTitle: doc.title,
-            recipientId,
-            readByUserIds: [activeUserId],
-          } as const;
-      const existing = prev.find(chat => chat.id === targetChatId);
-      if (existing) return prev.map(chat => chat.id === targetChatId ? { ...chat, messages: [...(chat.messages || []), message], lastMessage: `[分享文档] ${doc.title}` } : chat);
-      const recipient = USERS.find(user => user.id === recipientId);
-      if (!recipient) return prev;
-      return [...prev, { id: targetChatId, user: recipient, participantIds, lastMessage: `[分享文档] ${doc.title}`, timestamp: message.timestamp, unreadCount: 0, messages: [message] }];
+      let next = prev;
+      for (const selectedChat of selectedChats) {
+        const recipientId = selectedChat.user.id;
+        const participantIds = [activeUserId, recipientId].sort();
+        const existingDirectChat = next.find(chat => (chat.participantIds || ['u_jobs', chat.user.id]).slice().sort().join(':') === participantIds.join(':'));
+        const targetChatId = existingDirectChat?.id || `direct-${participantIds.join('-')}`;
+        const message = {
+          id: `m_${Date.now()}_${targetChatId}`,
+          senderId: activeUserId,
+          content: '我分享了一个文档给你，请查看。',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: 'shared_doc' as const,
+          docId: doc.id,
+          docTitle: doc.title,
+          recipientId,
+          readByUserIds: [activeUserId],
+        };
+        if (existingDirectChat) {
+          next = next.map(chat => chat.id === targetChatId ? { ...chat, messages: [...(chat.messages || []), message], lastMessage: `[分享文档] ${doc.title}`, timestamp: message.timestamp } : chat);
+        } else {
+          next = [...next, { id: targetChatId, user: selectedChat.user, participantIds, lastMessage: `[分享文档] ${doc.title}`, timestamp: message.timestamp, unreadCount: 0, messages: [message] }];
+        }
+      }
+      return next;
     });
-    setActiveApp('messages');
-    setActiveItemId(targetChatId);
   };
 
   const handleSendMessage = (chatId: string, content: string) => {

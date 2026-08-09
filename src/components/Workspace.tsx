@@ -13,7 +13,7 @@ interface WorkspaceProps {
   chats: ChatItem[];
   onAddDoc: (libId: string, doc: DocItem) => void;
   onUpdateDoc: (docId: string, patch: Partial<DocItem>) => void;
-  onShareDoc: (chatId: string, doc: DocItem) => void;
+  onShareDoc: (chatIds: string[], doc: DocItem) => void;
   onSendMessage: (chatId: string, content: string) => void;
   onMarkChatRead: (chatId: string, viewerId: string) => void;
   activeUserId: string;

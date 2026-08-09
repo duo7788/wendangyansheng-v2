@@ -83,21 +83,6 @@ function normalizeCitationText(value) {
     .replace(/[‘’]/g, "'");
 }
 
-function normalizeSingleDocumentCitations(content, sourceDocument) {
-  let foundCitation = false;
-  const normalized = content.replace(/\[\[cite:([\s\S]*?)(?:\]\]|】)/g, (marker, rawQuote) => {
-    foundCitation = true;
-    const quote = rawQuote.trim();
-    if (quote.length < 12 || quote.length > 120 || !normalizeCitationText(sourceDocument.content).includes(normalizeCitationText(quote))) {
-      throw new Error('AI 返回的单篇文档引用无法在原文中定位，请重试');
-    }
-    return `[[cite:${quote}]]`;
-  });
-  if (!foundCitation) throw new Error('AI 未返回单篇文档引用，请重试');
-  if (/\[\[cite:/.test(normalized)) throw new Error('AI 返回了不完整的单篇文档引用，请重试');
-  return normalized;
-}
-
 function validateCitations(content, sourceDocuments) {
   const sourceById = new Map(sourceDocuments.map(document => [document.id, document]));
   const citations = [...content.matchAll(/\[\[cite:([^|\]]+)\|([\s\S]*?)\]\]/g)];
@@ -201,9 +186,10 @@ export default async function handler(req, res) {
     if (!kimiResponse.ok) throw new Error(`Kimi 调用失败：${await kimiResponse.text()}`);
     const responseContent = contentFromStream(await kimiResponse.text());
     if (!responseContent) throw new Error('Kimi 没有返回可用内容');
-    const content = useBlockCitations
-      ? resolveBlockCitations(responseContent, citationBlocks)
-      : normalizeSingleDocumentCitations(responseContent, sourceDocument);
+    // Preserve the original single-document pipeline exactly. All citation
+    // rewriting and validation belongs exclusively to the related-document
+    // path, where a source identifier is required for cross-document lookup.
+    const content = useBlockCitations ? resolveBlockCitations(responseContent, citationBlocks) : responseContent;
     if (useBlockCitations) validateCitations(content, citationSources);
     if (isCitationRepair && !content.includes('[[cite:')) throw new Error('AI 未能修复出有效引用，请重试');
 

@@ -26,6 +26,8 @@ type MentionMenu = {
   y: number;
 };
 
+type ChallengeMessage = { role: { id: string; name: string }; content: string };
+
 // The current prototype keeps its source document in the editor markup rather
 // than a database.  This supplies that same source to Kimi until document
 // editing is persisted in Supabase.
@@ -247,6 +249,11 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [challengeRun, setChallengeRun] = useState(0);
   const [isChallengeStopped, setIsChallengeStopped] = useState(false);
   const [challengeTasks, setChallengeTasks] = useState<Array<{ key: string; roleName: string; content: string }>>([]);
+  const [challengeMessages, setChallengeMessages] = useState<ChallengeMessage[]>([]);
+  const [isChallengeLoading, setIsChallengeLoading] = useState(false);
+  const [challengeError, setChallengeError] = useState('');
+  const [challengeRunId, setChallengeRunId] = useState<string | null>(null);
+  const [savingChallengeTaskKeys, setSavingChallengeTaskKeys] = useState<Set<string>>(new Set());
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set<string>(initialRoleId ? [initialRoleId] : []));
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
@@ -445,20 +452,6 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   ]);
 
   const challengeParticipants = roles.filter(role => challengeRoleIds.has(role.id));
-  const challengePromptByRole: Record<string, string[]> = {
-    backend: [`“关键交付物”里，接口边界由谁确认？字段口径已经定下来了吗？`, `涉及的依赖服务如果不可用，用户侧的降级体验和负责人分别是什么？`, `数据结构变更的兼容策略和回滚方案，是否已经明确？`, `关键接口的权限校验、限流和审计日志是否覆盖完整？`, `异步任务失败后的重试、幂等和人工介入边界是否清楚？`, `关键数据的权限隔离和敏感信息处理是否有明确规则？`],
-    frontend: [`关键用户路径从打开页面到完成操作，第一步和下一步是否写清楚了？`, `操作反馈、失败状态和返回路径，是否能让用户知道当前发生了什么？`, `窄屏与不同浏览器下的布局、加载状态是否有明确验收标准？`, `交互中断后如何恢复用户上下文，文档里是否已有说明？`, `关键操作的防重复提交和离开页面提醒是否需要补充？`, `页面性能指标和首屏加载的可接受范围是否已经约定？`],
-    qa: [`验收标准能否直接转成测试用例？每项的通过条件是否明确？`, `是否已列出异常路径、权限差异和 WCAG AA 无障碍验收范围？`, `核心链路的边界值、并发和数据迁移场景是否覆盖？`, `上线后的监控阈值、告警责任人与复盘节奏是否明确？`, `回归范围、测试数据准备和发布前检查项是否有负责人？`, `异常恢复后，关键数据一致性的验证方式是否已经定义？`],
-    ui: [`执行摘要、关键交付物和行动项，阅读优先级是否足够明确？`, `“嵌入的原型”和关键交付物之间的关系，是否需要增加更直观的结构说明？`, `信息层级、空状态和错误状态是否与主路径保持一致？`, `关键动作的反馈与无障碍描述是否足以支撑验收？`, `复杂信息是否需要进一步拆分，帮助读者快速理解重点？`, `不同状态下的文案语气和视觉反馈是否保持一致？`],
-  };
-  const hasNoMoreChallenges = challengeRun >= 2;
-  // Every selected role speaks once per configured round.
-  const challengeMessages = hasNoMoreChallenges
-    ? challengeParticipants.slice(0, 2).map((role, index) => ({ role, content: index === 0 ? '唔，感觉似乎没什么可以质疑的了呢。' : '我感觉已经是一份很棒的文档了！' }))
-    : Array.from({ length: challengeSentencesPerRole }, (_, round) => round).flatMap(round => challengeParticipants.map(role => ({
-      role,
-      content: (challengePromptByRole[role.id] || ['尚未明确的关键假设有哪些？', '执行边界和风险处理，是否需要在开始前补充？', '当前方案的验收依据是否足够清晰？'])[challengeRun * challengeSentencesPerRole + round],
-    })));
   const activeChallengeMessage = challengeMessages[challengeTurn];
   const [typedChallengeLength, setTypedChallengeLength] = useState(0);
   const isChallengeSentenceComplete = Boolean(activeChallengeMessage && typedChallengeLength >= activeChallengeMessage.content.length);
@@ -499,33 +492,73 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     return () => window.cancelAnimationFrame(frameId);
   }, [isChallengePanelOpen, isChallengeStopped, challengeTurn, activeChallengeMessage?.content]);
 
+  const generateChallenges = async (run: number) => {
+    if (!challengeParticipants.length) return;
+    setIsChallengeLoading(true);
+    setChallengeError('');
+    setChallengeMessages([]);
+    setChallengeRunId(null);
+    setChallengeTurn(0);
+    setIsChallengeStopped(false);
+    try {
+      const relatedDocuments = allDocs.filter(item => selectedDocIds.has(item.id)).map(item => ({ id: item.id, title: item.title, content: toAiText(item.content || '') }));
+      const response = await fetch('/api/generate-challenges', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceDocument: { id: doc.id, title: doc.title, content: sourceTextForAi }, relatedDocuments, roles: challengeParticipants, sentencesPerRole: challengeSentencesPerRole }),
+      });
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data.challenges)) throw new Error(data.error || '生成模拟质疑失败');
+      if (!data.run?.id) throw new Error('模拟质疑已生成，但未能保存记录');
+      setChallengeRun(run);
+      setChallengeMessages(data.challenges);
+      setChallengeRunId(data.run.id);
+    } catch (error) {
+      setChallengeError(error instanceof Error ? error.message : '生成模拟质疑失败');
+    } finally {
+      setIsChallengeLoading(false);
+    }
+  };
   const startChallenge = () => {
     if (!challengeRoleIds.size) return;
-    setChallengeRun(0);
-    setChallengeTurn(0);
     setChallengeTasks([]);
-    setIsChallengeStopped(false);
     setIsChallengeModalOpen(false);
     setIsCommentPanelOpen(false);
     setIsSidebarOpen(false);
     setIsChallengePanelOpen(true);
+    void generateChallenges(0);
   };
   const restartChallenge = () => {
-    setChallengeRun(run => run + 1);
-    setChallengeTurn(0);
-    setIsChallengeStopped(false);
+    void generateChallenges(challengeRun + 1);
   };
   const closeChallengePanel = () => {
     setIsChallengeStopped(true);
     setIsChallengePanelOpen(false);
   };
   const challengeTaskKey = (index: number) => `${challengeRun}-${index}`;
-  const addChallengeTask = (index: number) => {
+  const addChallengeTask = async (index: number) => {
     const message = challengeMessages[index];
-    if (!message) return;
+    if (!message || !challengeRunId) return;
     const key = challengeTaskKey(index);
-    setChallengeTasks(previous => previous.some(task => task.key === key) ? previous : [...previous, { key, roleName: message.role.name, content: message.content }]);
-    onAddChallengeTask({ id: `challenge_${doc.id}_${key}`, docId: doc.id, docTitle: doc.title, roleName: message.role.name, content: message.content });
+    if (challengeTasks.some(task => task.key === key) || savingChallengeTaskKeys.has(key)) return;
+    setSavingChallengeTaskKeys(previous => new Set(previous).add(key));
+    try {
+      const response = await fetch('/api/challenge-tasks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challengeRunId, sourceDocumentId: doc.id, challengeIndex: index, roleId: message.role.id, roleName: message.role.name, content: message.content }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.task?.id) throw new Error(data.error || '保存质疑任务失败');
+      setChallengeTasks(previous => [...previous, { key, roleName: message.role.name, content: message.content }]);
+      onAddChallengeTask({ id: data.task.id, docId: doc.id, docTitle: doc.title, roleName: message.role.name, content: message.content });
+    } catch (error) {
+      setChallengeError(error instanceof Error ? error.message : '保存质疑任务失败');
+    } finally {
+      setSavingChallengeTaskKeys(previous => {
+        const next = new Set(previous);
+        next.delete(key);
+        return next;
+      });
+    }
   };
   const toggleChallengeRole = (roleId: string) => setChallengeRoleIds(previous => {
     const next = new Set(previous);
@@ -1518,8 +1551,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
             </div>
             <div ref={challengePanelScrollRef} className="flex-1 overflow-x-hidden overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {isChallengePanelOpen ? <div className="p-5">
-                <p className="text-xs leading-relaxed text-zinc-500">让不同角色从自己的专业视角依次质疑这份原文，帮助你发现遗漏。</p>
+                <p className="text-xs leading-relaxed text-zinc-500">让不同角色从自己的专业视角，像同事评审一样依次追问这份文档。</p>
                 <div className="mt-6 space-y-[30px]">
+                  {isChallengeLoading && <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-500">正在请角色审阅文档并准备质疑……</div>}
+                  {challengeError && <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-4 text-sm leading-relaxed text-rose-700"><p>{challengeError}</p><button type="button" onClick={restartChallenge} className="mt-3 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100">重试</button></div>}
                   <AnimatePresence initial={false}>
                     {(challengeTurn >= challengeMessages.length ? challengeMessages : challengeMessages.slice(0, Math.min(challengeTurn + 1, challengeMessages.length))).map((message, visibleIndex) => {
                       const messageIndex = visibleIndex;
@@ -1528,20 +1563,21 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                       const taskKey = challengeTaskKey(messageIndex);
                       const canAddTask = challengeTurn >= challengeMessages.length || (isSpeaking && isChallengeSentenceComplete);
                       const taskAdded = challengeTasks.some(task => task.key === taskKey);
+                      const isSavingTask = savingChallengeTaskKeys.has(taskKey);
                       const isChallengeComplete = challengeTurn >= challengeMessages.length;
                       return <motion.div ref={node => { if (isSpeaking) activeChallengeItemRef.current = node; }} key={`${message.role.id}-${messageIndex}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }} className={`group/message flex items-end gap-4 ${isRightAligned ? 'flex-row-reverse' : ''}`}>
                         <PixelSpeaker roleId={message.role.id} roleName={message.role.name} speaking={isSpeaking} flipped={isRightAligned} />
                         <div className={`relative max-w-[232px] rounded-2xl px-3.5 py-3 text-xs font-medium leading-5 transition-colors ${isSpeaking ? 'bg-zinc-200 text-zinc-900' : 'bg-zinc-100 text-zinc-600'} ${isRightAligned ? 'rounded-br-md' : 'rounded-bl-md'}`}>
                           <span aria-hidden="true" className={`absolute bottom-0 h-4 w-3 bg-inherit ${isRightAligned ? '-right-3 -scale-x-100 [clip-path:polygon(100%_0,100%_100%,0_100%)]' : '-left-3 [clip-path:polygon(100%_0,100%_100%,0_100%)]'}`} />
                           <span className="relative">{isSpeaking ? message.content.slice(0, typedChallengeLength) : message.content}</span>
-                          {canAddTask && <button type="button" onClick={() => addChallengeTask(messageIndex)} disabled={taskAdded} aria-label={taskAdded ? '已添加到任务' : '添加到任务'} className={`group/task absolute -bottom-3 ${isRightAligned ? '-left-3' : '-right-3'} flex h-7 w-7 items-center justify-center rounded-full border text-xs transition-colors ${isChallengeComplete ? 'pointer-events-none opacity-0 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100' : ''} ${taskAdded ? 'border-zinc-300 bg-zinc-200 text-zinc-500' : 'border-zinc-200 bg-white text-zinc-700 shadow-sm hover:border-zinc-900 hover:bg-zinc-900 hover:text-white'}`}><Plus size={14} />{!taskAdded && <span role="tooltip" className="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition-none group-hover/task:opacity-100 group-focus-visible/task:opacity-100">添加到任务</span>}</button>}
+                          {canAddTask && <button type="button" onClick={() => void addChallengeTask(messageIndex)} disabled={taskAdded || isSavingTask} aria-label={taskAdded ? '已添加到任务' : isSavingTask ? '正在保存任务' : '添加到任务'} className={`group/task absolute -bottom-3 ${isRightAligned ? '-left-3' : '-right-3'} flex h-7 w-7 items-center justify-center rounded-full border text-xs transition-colors ${isChallengeComplete ? 'pointer-events-none opacity-0 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100' : ''} ${taskAdded || isSavingTask ? 'border-zinc-300 bg-zinc-200 text-zinc-500' : 'border-zinc-200 bg-white text-zinc-700 shadow-sm hover:border-zinc-900 hover:bg-zinc-900 hover:text-white'}`}><Plus size={14} />{!taskAdded && !isSavingTask && <span role="tooltip" className="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition-none group-hover/task:opacity-100 group-focus-visible/task:opacity-100">添加到任务</span>}</button>}
                         </div>
                       </motion.div>;
                     })}
                   </AnimatePresence>
-                  {!challengeMessages.length && <p className="rounded-xl bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-400">请选择至少一个角色开始模拟质疑。</p>}
+                  {!isChallengeLoading && !challengeError && !challengeMessages.length && <p className="rounded-xl bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-400">请选择至少一个角色开始模拟质疑。</p>}
                 </div>
-                {challengeTurn >= challengeMessages.length && challengeMessages.length > 0 && <button type="button" onClick={restartChallenge} className="mt-7 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-900">重新质疑</button>}
+                {!isChallengeLoading && challengeTurn >= challengeMessages.length && challengeMessages.length > 0 && <button type="button" onClick={restartChallenge} className="mt-7 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-900">重新质疑</button>}
                 {challengeTasks.length > 0 && <div className="mt-5 border-t border-zinc-100 pt-4"><p className="text-xs font-semibold text-zinc-900">任务列表</p><div className="mt-2 space-y-2">{challengeTasks.map(task => <div key={task.key} className="rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-xs leading-relaxed text-zinc-700 shadow-sm"><span className="mr-1 font-semibold text-zinc-900">{task.roleName}：</span>{task.content}</div>)}</div></div>}
               </div> : isCommentPanelOpen ? <div className="p-4 space-y-3">
                 {comments.filter(comment => comment.status !== 'resolved').map(comment => {

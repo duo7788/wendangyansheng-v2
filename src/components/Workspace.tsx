@@ -34,7 +34,7 @@ interface WorkspaceProps {
   challengeTasks: ChallengeTask[];
   onAddChallengeTask: (task: Omit<ChallengeTask, 'createdAt' | 'unread' | 'status'>) => void;
   onMarkChallengeTaskRead: (taskId: string) => void;
-  onResolveChallengeTask: (taskId: string) => void;
+  onResolveChallengeTask: (taskId: string) => Promise<void>;
   isDirCollapsed: boolean;
   setIsDirCollapsed: (collapsed: boolean) => void;
   setActiveApp: (app: AppIdentifier) => void;

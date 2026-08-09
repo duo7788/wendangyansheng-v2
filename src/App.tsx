@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Directory } from './components/Directory';
 import { Workspace } from './components/Workspace';
@@ -49,6 +49,28 @@ export default function App() {
   const [taskEntryUnreadCount, setTaskEntryUnreadCount] = useState(0);
   const [taskPulseKey, setTaskPulseKey] = useState(0);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/challenge-tasks')
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('无法读取任务')))
+      .then(data => {
+        if (cancelled || !Array.isArray(data.tasks)) return;
+        const docs = initialMockLibraries.flatMap(library => library.docs);
+        setChallengeTasks(data.tasks.map((task: { id: string; source_document_id: string; role_name: string; content: string; status: 'open' | 'resolved'; created_at: string }) => ({
+          id: task.id,
+          docId: task.source_document_id,
+          docTitle: docs.find(doc => doc.id === task.source_document_id)?.title || '文档',
+          roleName: task.role_name,
+          content: task.content,
+          createdAt: new Date(task.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          unread: false,
+          status: task.status,
+        })));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
   const handleAddChallengeTask = useCallback((task: Omit<ChallengeTask, 'createdAt' | 'unread' | 'status'>) => {
     setChallengeTasks(previous => {
       if (previous.some(item => item.id === task.id)) return previous;
@@ -63,7 +85,14 @@ export default function App() {
     setTaskPulseKey(key => key + 1);
   }, []);
   const handleMarkChallengeTaskRead = useCallback((taskId: string) => setChallengeTasks(previous => previous.map(task => task.id === taskId ? { ...task, unread: false } : task)), []);
-  const handleResolveChallengeTask = useCallback((taskId: string) => setChallengeTasks(previous => previous.map(task => task.id === taskId ? { ...task, unread: false, status: 'resolved' } : task)), []);
+  const handleResolveChallengeTask = useCallback(async (taskId: string) => {
+    const response = await fetch('/api/challenge-tasks', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, status: 'resolved' }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '更新任务失败');
+    setChallengeTasks(previous => previous.map(task => task.id === taskId ? { ...task, unread: false, status: 'resolved' } : task));
+  }, []);
 
   const handleShareDoc = (chatId: string, doc: DocItem) => {
     const recipientId = chats.find(chat => chat.id === chatId)?.user.id;

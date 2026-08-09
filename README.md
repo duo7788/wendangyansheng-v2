@@ -22,6 +22,8 @@
 
 项目已预留带原文依据的结构化理解底稿表，供后续的可追溯生成与局部同步使用。当前角色生成仍直接处理原文，避免首次生成因额外 AI 调用而变慢。对于已部署的项目，请在 Supabase SQL Editor 执行 [理解底稿迁移](supabase/migrations/20260806_document_understandings.sql)；新项目仍可直接执行完整的 [schema.sql](supabase/schema.sql)。
 
+模拟质疑会调用 Kimi，为不同角色生成口语化的专业追问。每次生成及从中添加的任务都会保存到 Supabase，任务完成状态也会同步保存。已部署项目请额外执行 [模拟质疑迁移](supabase/migrations/20260809_document_challenges.sql)；新项目直接执行完整的 [schema.sql](supabase/schema.sql) 即可。
+
 生成后的角色版本会在重新打开页面时从 Supabase 读取。当前原型尚未加入登录/成员权限；正式对外使用前，应先加 Supabase Auth，并在 API 中验证用户是否有该文档权限。
 
 ## Run Locally

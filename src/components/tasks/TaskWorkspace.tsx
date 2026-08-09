@@ -13,7 +13,7 @@ interface TaskWorkspaceProps {
   onDelete: (id: string) => void;
   challengeTasks: ChallengeTask[];
   onMarkChallengeTaskRead: (taskId: string) => void;
-  onResolveChallengeTask: (taskId: string) => void;
+  onResolveChallengeTask: (taskId: string) => Promise<void>;
 }
 
 export function TaskWorkspace({ comments, libraries, activeUserId, onReply, onResolve, onDelete, challengeTasks, onMarkChallengeTaskRead, onResolveChallengeTask }: TaskWorkspaceProps) {
@@ -21,6 +21,7 @@ export function TaskWorkspace({ comments, libraries, activeUserId, onReply, onRe
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const [challengeTaskError, setChallengeTaskError] = useState('');
   const [completingCommentId, setCompletingCommentId] = useState<string | null>(null);
   const docsById = useMemo(() => new Map(libraries.flatMap(library => library.docs).map(doc => [doc.id, doc])), [libraries]);
   const relevantComments = comments.filter(comment =>
@@ -34,13 +35,18 @@ export function TaskWorkspace({ comments, libraries, activeUserId, onReply, onRe
   const resolvedChallengeTasks = challengeTasks.filter(task => task.status === 'resolved');
   const openCount = openComments.length + openChallengeTasks.length;
 
-  const completeChallengeTask = (taskId: string) => {
+  const completeChallengeTask = async (taskId: string) => {
     if (completingTaskId) return;
+    setChallengeTaskError('');
     setCompletingTaskId(taskId);
-    window.setTimeout(() => {
-      onResolveChallengeTask(taskId);
+    try {
+      await new Promise(resolve => window.setTimeout(resolve, 600));
+      await onResolveChallengeTask(taskId);
+    } catch (error) {
+      setChallengeTaskError(error instanceof Error ? error.message : '更新任务失败');
+    } finally {
       setCompletingTaskId(null);
-    }, 1000);
+    }
   };
   const completeCommentTask = (commentId: string) => {
     if (completingCommentId) return;
@@ -84,5 +90,5 @@ export function TaskWorkspace({ comments, libraries, activeUserId, onReply, onRe
     </article>;
   };
 
-  return <main className="h-full overflow-y-auto bg-white"><div className="mx-auto max-w-7xl px-10 py-12"><header className="mb-9"><p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">协作中心</p><h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-900">任务</h1><p className="mt-2 text-sm text-zinc-500">集中处理需要你回应或确认解决的文档讨论。</p></header><section><div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-base font-semibold text-zinc-900"><CircleDot size={18} className="text-indigo-600" />待处理 <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">{openCount}</span></h2></div><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{openCount ? <>{openChallengeTasks.map(task => renderChallengeCard(task))}{openComments.map(comment => renderCommentCard(comment))}</> : <div className="col-span-full rounded-2xl border border-dashed border-zinc-200 py-12 text-center text-sm text-zinc-400">目前没有待处理的任务。</div>}</div></section><section className="mt-10 border-t border-zinc-100 pt-6"><button onClick={() => setShowResolved(!showResolved)} className="flex w-full items-center justify-between text-left"><span className="flex items-center gap-2 text-base font-semibold text-zinc-700"><CheckCircle2 size={18} className="text-emerald-600" />已完成 <span className="text-sm font-normal text-zinc-400">{resolvedChallengeTasks.length + resolvedComments.length}</span></span><ChevronDown size={18} className={`text-zinc-400 transition-transform ${showResolved ? 'rotate-180' : ''}`} /></button>{showResolved && <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{resolvedChallengeTasks.length + resolvedComments.length ? <>{resolvedChallengeTasks.map(task => renderChallengeCard(task, true))}{resolvedComments.map(comment => renderCommentCard(comment, true))}</> : <p className="col-span-full py-5 text-sm text-zinc-400">还没有已完成的任务。</p>}</div>}</section></div></main>;
+  return <main className="h-full overflow-y-auto bg-white"><div className="mx-auto max-w-7xl px-10 py-12"><header className="mb-9"><p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">任务中心</p><h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-900">任务</h1><p className="mt-2 text-sm text-zinc-500">集中处理从模拟质疑中采纳的事项。</p></header>{challengeTaskError && <p className="mb-5 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{challengeTaskError}</p>}<section><div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-base font-semibold text-zinc-900"><CircleDot size={18} className="text-indigo-600" />待处理 <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">{openCount}</span></h2></div><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{openCount ? <>{openChallengeTasks.map(task => renderChallengeCard(task))}{openComments.map(comment => renderCommentCard(comment))}</> : <div className="col-span-full rounded-2xl border border-dashed border-zinc-200 py-12 text-center text-sm text-zinc-400">目前没有待处理的任务。</div>}</div></section><section className="mt-10 border-t border-zinc-100 pt-6"><button onClick={() => setShowResolved(!showResolved)} className="flex w-full items-center justify-between text-left"><span className="flex items-center gap-2 text-base font-semibold text-zinc-700"><CheckCircle2 size={18} className="text-emerald-600" />已完成 <span className="text-sm font-normal text-zinc-400">{resolvedChallengeTasks.length + resolvedComments.length}</span></span><ChevronDown size={18} className={`text-zinc-400 transition-transform ${showResolved ? 'rotate-180' : ''}`} /></button>{showResolved && <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{resolvedChallengeTasks.length + resolvedComments.length ? <>{resolvedChallengeTasks.map(task => renderChallengeCard(task, true))}{resolvedComments.map(comment => renderCommentCard(comment, true))}</> : <p className="col-span-full py-5 text-sm text-zinc-400">还没有已完成的任务。</p>}</div>}</section></div></main>;
 }

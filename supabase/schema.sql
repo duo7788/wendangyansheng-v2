@@ -47,6 +47,32 @@ create table if not exists public.document_understandings (
   unique (source_document_id, source_content_hash, related_content_hash)
 );
 
+-- 每次 AI 模拟质疑均保留生成上下文和结果，便于作者回看、协作和审计。
+create table if not exists public.document_challenge_runs (
+  id uuid primary key default gen_random_uuid(),
+  source_document_id text not null,
+  source_document_title text not null,
+  participant_roles jsonb not null,
+  challenges jsonb not null,
+  model text not null,
+  created_at timestamptz not null default now()
+);
+
+-- 作者从模拟质疑中采纳的事项。challenge_index 对应一次生成中的问题序号。
+create table if not exists public.document_challenge_tasks (
+  id uuid primary key default gen_random_uuid(),
+  challenge_run_id uuid not null references public.document_challenge_runs(id) on delete cascade,
+  source_document_id text not null,
+  challenge_index integer not null check (challenge_index >= 0),
+  role_id text not null,
+  role_name text not null,
+  content text not null,
+  status text not null default 'open' check (status in ('open', 'resolved')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (challenge_run_id, challenge_index)
+);
+
 create or replace function public.set_updated_at()
 returns trigger language plpgsql as $$
 begin
@@ -70,13 +96,22 @@ create trigger document_derivation_updates_set_updated_at
 before update on public.document_derivation_updates
 for each row execute function public.set_updated_at();
 
+drop trigger if exists document_challenge_tasks_set_updated_at on public.document_challenge_tasks;
+create trigger document_challenge_tasks_set_updated_at
+before update on public.document_challenge_tasks
+for each row execute function public.set_updated_at();
+
 -- 浏览器不会直接访问此表；Vercel 的服务端使用 service_role 保存数据。
 alter table public.document_derivations enable row level security;
 alter table public.document_understandings enable row level security;
 alter table public.document_derivation_updates enable row level security;
+alter table public.document_challenge_runs enable row level security;
+alter table public.document_challenge_tasks enable row level security;
 
 -- New Supabase Secret keys are mapped to service_role for server-side calls.
 -- It bypasses RLS, but still needs table-level privileges.
 grant select, insert, update on table public.document_derivations to service_role;
 grant select, insert, update on table public.document_understandings to service_role;
 grant select, insert, update on table public.document_derivation_updates to service_role;
+grant select, insert, update on table public.document_challenge_runs to service_role;
+grant select, insert, update on table public.document_challenge_tasks to service_role;

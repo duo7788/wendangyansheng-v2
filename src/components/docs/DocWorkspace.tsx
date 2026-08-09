@@ -1617,6 +1617,9 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 const isComplete = Boolean(derivation) && !isLoading && !isCancelled;
                 const relatedDocs = displayedRelatedDocs[roleId] || derivation?.relatedDocumentIds || activeDerivativeDocs;
                 const hasRelatedDocs = relatedDocs.length > 0;
+                // A missing inline marker is a real data-quality issue: the
+                // renderer cannot highlight a source that was never saved.
+                // Expose an explicit repair action instead of concealing it.
                 const needsCitationRepair = Boolean(derivation && (derivation.content.includes(']]') || !derivation.content.includes('[[cite:')));
                 
                 return (
@@ -1651,7 +1654,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                         <div className="flex gap-1.5">
                           {isLoading ? <button type="button" onClick={() => stopGeneration(roleId)} className="h-8 min-w-[104px] whitespace-nowrap rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-500 transition-colors hover:border-zinc-500 hover:text-zinc-900">停止</button> : <>
                             {isComplete && <button onClick={() => toggleDerivativeView(roleId, isViewing)} disabled={Boolean(pendingDerivativeRole)} className="h-8 min-w-0 flex-1 whitespace-nowrap rounded-md bg-zinc-100 px-2 text-xs font-semibold text-zinc-900 transition-colors hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-60">{isViewing ? '关闭视图' : '查看文档'}</button>}
-                            {canManageDerivations && isComplete && needsCitationRepair && <button onClick={() => void generateForRole(roleId, derivation?.relatedDocumentIds || activeDerivativeDocs, derivation?.visualOverview, derivation?.content)} className="h-8 min-w-0 flex-1 whitespace-nowrap rounded-md bg-amber-50 px-2 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100">修复引用</button>}
+                            {canManageDerivations && isComplete && needsCitationRepair && <button onClick={() => void generateForRole(roleId, derivation?.relatedDocumentIds || activeDerivativeDocs, derivation?.visualOverview, derivation?.content)} className="h-8 min-w-0 flex-1 whitespace-nowrap rounded-md bg-amber-50 px-2 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100">补全引用</button>}
                             {canManageDerivations && <button onClick={() => void generateForRole(roleId, derivation?.relatedDocumentIds || activeDerivativeDocs)} className="h-8 min-w-0 flex-1 whitespace-nowrap rounded-md bg-zinc-100 px-2 text-xs font-semibold text-zinc-900 transition-colors hover:bg-zinc-200">重新生成</button>}
                             {canManageDerivations && isComplete && <button onClick={() => onApplyDerivation(doc.id, roleId, !appliedRoleIds.has(roleId))} className={`h-8 min-w-0 flex-1 whitespace-nowrap rounded-md px-2 text-xs font-semibold transition-colors ${appliedRoleIds.has(roleId) ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-zinc-950 text-white hover:bg-zinc-800'}`}>{appliedRoleIds.has(roleId) ? '已应用' : '应用'}</button>}
                           </>}

@@ -123,29 +123,39 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: '只支持 POST 请求' });
 
   try {
-    const { sourceDocument, role, relatedDocuments = [], understanding = null } = req.body || {};
+    const { sourceDocument, role, relatedDocuments = [], understanding = null, existingContent = null } = req.body || {};
     if (!sourceDocument?.id || !sourceDocument?.title || !sourceDocument?.content || !role?.id || !role?.name) {
       return json(res, 400, { error: '缺少原始文档或目标角色信息' });
     }
 
     const citationSources = sourceDocumentsForCitation(sourceDocument, relatedDocuments);
-    const citationBlocks = buildCitationBlocks(citationSources);
-    if (!citationBlocks.length) throw new Error('来源文档中没有可用于引用的文本');
-    const sourceMaterial = citationSources.map(document => {
-      const blocks = citationBlocks.filter(block => block.documentId === document.id);
-      return `【文档：${document.title}】\n${blocks.map(block => `[${block.id}] ${block.text}`).join('\n')}`;
-    }).join('\n\n');
+    const hasRelatedSource = citationSources.length > 1;
+    const isCitationRepair = typeof existingContent === 'string' && existingContent.trim().length > 0;
+    const useBlockCitations = hasRelatedSource || isCitationRepair;
+    const citationBlocks = useBlockCitations ? buildCitationBlocks(citationSources) : [];
+    if (useBlockCitations && !citationBlocks.length) throw new Error('来源文档中没有可用于引用的文本');
+    const sourceMaterial = useBlockCitations
+      ? citationSources.map(document => {
+        const blocks = citationBlocks.filter(block => block.documentId === document.id);
+        return `【文档：${document.title}】\n${blocks.map(block => `[${block.id}] ${block.text}`).join('\n')}`;
+      }).join('\n\n')
+      : sourceDocument.content;
     const factContext = Array.isArray(understanding?.facts) && understanding.facts.length
       ? understanding.facts.map((fact) => `- ${fact.statement}\n  依据：${fact.evidence.map(item => item.quote).join('；')}`).join('\n')
       : null;
     const sourceContext = factContext
       ? `已完成的文档理解底稿（只能依据以下事实和依据生成）：\n${factContext}\n\n引用来源文档：\n${sourceMaterial}`
-      : `来源文档：\n${sourceMaterial}`;
-    const hasRelatedSource = citationSources.length > 1;
+      : useBlockCitations ? `来源文档：\n${sourceMaterial}` : `原始文档：\n${sourceMaterial}\n\n关联资料：\n无`;
     const headingRequirements = hasRelatedSource
       ? `请使用 Markdown，并严格按以下标题组织：\n# 联合工作标题\n## ${role.name}工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n标题规则：\n- “联合工作标题”必须是 6–18 个中文字符的主题概括，提炼多篇文档共同要解决的业务或研发事项。\n- 不得把文档标题直接拼接、不得使用加号、不得照抄任一文档标题、不得包含角色名称。`
       : `请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项`;
-    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n${headingRequirements}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:原文块ID]]。示例：[[cite:S1]]；关联文档的块会是 [[cite:R1-1]]。\n- 原文块ID 必须从资料中方括号标出的短 ID 原样复制。S 开头代表主文档，R 开头代表关联文档。\n- 不要填写文档标题或文档 ID，不要复制原文短句，不要编造或省略引用标记。\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
+    const citationRequirements = useBlockCitations
+      ? `- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:原文块ID]]。示例：[[cite:S1]]；关联文档的块会是 [[cite:R1-1]]。\n- 原文块ID 必须从资料中方括号标出的短 ID 原样复制。S 开头代表主文档，R 开头代表关联文档。\n- 不要填写文档标题或文档 ID，不要复制原文短句，不要编造或省略引用标记。`
+      : `- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:原文中连续出现的精确短句]]。\n- cite 内只能复制上方原始文档中连续出现的 12–60 个字符，不能概括、改写或编造；不要在 cite 外展示原文摘录。`;
+    const taskInstruction = isCitationRepair
+      ? `下面是已有的角色工作视图。请修复其中的引用：保留标题、段落、表格、行动项和正文措辞，不要重新总结或增删业务内容；删除其中残缺的 ]] 或旧引用标记，并为每个关键结论或行动项补上正确引用。\n\n已有角色工作视图：\n${existingContent}`
+      : `请生成一份可执行的中文工作视图。\n\n${headingRequirements}`;
+    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」完成以下工作：\n\n${taskInstruction}\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n${citationRequirements}\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
 
     const model = process.env.KIMI_MODEL || 'kimi-k2.5';
     // The production Kimi endpoint currently requires temperature 0.6 for
@@ -176,8 +186,9 @@ export default async function handler(req, res) {
     if (!kimiResponse.ok) throw new Error(`Kimi 调用失败：${await kimiResponse.text()}`);
     const responseContent = contentFromStream(await kimiResponse.text());
     if (!responseContent) throw new Error('Kimi 没有返回可用内容');
-    const content = resolveBlockCitations(responseContent, citationBlocks);
-    validateCitations(content, citationSources);
+    const content = useBlockCitations ? resolveBlockCitations(responseContent, citationBlocks) : responseContent;
+    if (useBlockCitations) validateCitations(content, citationSources);
+    if (isCitationRepair && !content.includes('[[cite:')) throw new Error('AI 未能修复出有效引用，请重试');
 
     const saved = await saveDerivation({
       source_document_id: sourceDocument.id,

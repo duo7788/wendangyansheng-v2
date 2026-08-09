@@ -807,7 +807,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   };
 
   const handleGenerate = () => {
-    const rolesArray = (Array.from(selectedRoleIds) as string[]).filter(roleId => !appliedRoleIds.has(roleId));
+    // A role view remains available even before it is applied. Opening the
+    // create dialog again must therefore generate only roles without an
+    // existing view; deliberate regeneration stays on the role card.
+    const rolesArray = (Array.from(selectedRoleIds) as string[]).filter(roleId => !appliedRoleIds.has(roleId) && !generatedDerivations[roleId]);
     if (rolesArray.length === 0) return;
     setActiveDerivativeRoles(previous => Array.from(new Set([...previous, ...rolesArray])));
     setActiveDerivativeDocs(Array.from(selectedDocIds) as string[]);
@@ -819,6 +822,11 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     setIsChallengePanelOpen(false);
     setIsSidebarOpen(true);
     setViewingDerivativeRole(null);
+    setSelectedRoleIds(previous => {
+      const next = new Set(previous);
+      rolesArray.forEach(roleId => next.delete(roleId));
+      return next;
+    });
     // Let the role modal finish closing before the library begins to collapse.
     window.setTimeout(() => setIsDirCollapsed(true), 240);
     

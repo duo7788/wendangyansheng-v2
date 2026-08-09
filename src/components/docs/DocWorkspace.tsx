@@ -1025,6 +1025,14 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   };
   const openInlineCitation = (citation: InlineCitation) => {
     setInlineCitationPreview(null);
+    // Single-document citations already have their source mounted. Keep the
+    // original proven timing instead of routing them through the associated-
+    // document switching workflow below.
+    if (!citation.sourceDocumentId) {
+      setShowOriginal(true);
+      window.setTimeout(() => flashInlineOriginal(citation.quote), 300);
+      return;
+    }
     if (citation.sourceDocumentId && !sourceDocuments.some(source => source.id === citation.sourceDocumentId)) {
       showToast('关联文档未加载，无法定位该引用');
       return;
@@ -1036,6 +1044,11 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const revealInlineOriginal = () => {
     const citation = inlineCitationPreview;
     setInlineCitationPreview(null);
+    if (citation && !citation.sourceDocumentId) {
+      setShowOriginal(true);
+      window.setTimeout(() => flashInlineOriginal(citation.quote), 280);
+      return;
+    }
     setShowOriginal(true);
     if (citation) {
       setPendingInlineCitation(citation);

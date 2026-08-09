@@ -40,6 +40,8 @@ export interface DocItem {
   content?: string;
   isUntitled?: boolean;
   isBlank?: boolean;
+  /** Imported files stay only in the current browser's local storage. */
+  isLocalFile?: boolean;
 }
 
 export interface DocLibrary {

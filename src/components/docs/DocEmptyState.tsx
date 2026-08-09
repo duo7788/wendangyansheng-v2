@@ -54,6 +54,7 @@ export function DocEmptyState({ libraries, onAddDoc }: DocEmptyStateProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [extractedHtml, setExtractedHtml] = useState<string>('');
+  const [isParsing, setIsParsing] = useState(false);
   const [activeEntryIndex, setActiveEntryIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -85,18 +86,33 @@ export function DocEmptyState({ libraries, onAddDoc }: DocEmptyStateProps) {
     if (file) {
       setSelectedFile(file);
       setIsImporting(true);
+      setIsParsing(true);
       
       try {
         if (file.name.toLowerCase().endsWith('.doc')) {
           setExtractedHtml(await extractHtmlFromConfluenceDoc(file));
         } else {
           const arrayBuffer = await file.arrayBuffer();
-          const result = await mammoth.convertToHtml({ arrayBuffer }, { styleMap: ["p[style-name='Heading 1'] => h1:fresh", "p[style-name='Heading 2'] => h2:fresh", "p[style-name='Heading 3'] => h3:fresh"] });
-          setExtractedHtml(result.value);
+          const result = await mammoth.convertToHtml({ arrayBuffer }, {
+            styleMap: ["p[style-name='Heading 1'] => h1:fresh", "p[style-name='Heading 2'] => h2:fresh", "p[style-name='Heading 3'] => h3:fresh"],
+            // Keep every embedded DOCX image in the browser as a data URL.
+            // This is deliberately client-only: nothing here is uploaded to AI.
+            convertImage: mammoth.images.imgElement(async image => ({
+              src: `data:${image.contentType};base64,${await image.readAsBase64String()}`,
+            })),
+          });
+          const parsed = new DOMParser().parseFromString(result.value, 'text/html');
+          parsed.querySelectorAll('img').forEach((image, index) => {
+            if (!image.getAttribute('alt')) image.setAttribute('alt', `文档图片 ${index + 1}`);
+            image.setAttribute('loading', 'lazy');
+          });
+          setExtractedHtml(parsed.body.innerHTML);
         }
       } catch (error) {
         console.error("Error parsing docx:", error);
         setExtractedHtml("<p>无法解析文档内容或不支持的格式。请上传 .docx 文件。</p>");
+      } finally {
+        setIsParsing(false);
       }
     }
     // Reset input
@@ -112,7 +128,8 @@ export function DocEmptyState({ libraries, onAddDoc }: DocEmptyStateProps) {
       updatedAt: '刚刚',
       author: '当前用户',
       type: 'document',
-      content: extractedHtml
+      content: extractedHtml,
+      isLocalFile: true,
     };
     
     onAddDoc(libId, newDoc);
@@ -120,6 +137,7 @@ export function DocEmptyState({ libraries, onAddDoc }: DocEmptyStateProps) {
     setIsImporting(false);
     setSelectedFile(null);
     setExtractedHtml('');
+    setIsParsing(false);
   };
 
   const handleCreate = (libId: string) => {
@@ -225,11 +243,12 @@ export function DocEmptyState({ libraries, onAddDoc }: DocEmptyStateProps) {
               </div>
               
               <div className="mb-6">
-                <p className="text-sm text-zinc-500 mb-2">正在导入文件：</p>
+                <p className="text-sm text-zinc-500 mb-2">{isParsing ? '正在读取文档和图片：' : '已在本机导入：'}</p>
                 <div className="flex items-center gap-2 bg-zinc-50 p-3 rounded-lg border border-zinc-100">
                   <FileText size={16} className="text-blue-500" />
                   <span className="text-sm text-zinc-700 font-medium truncate">{selectedFile.name}</span>
                 </div>
+                <p className="mt-3 text-xs leading-5 text-zinc-400">图片仅保存在当前浏览器，并会随文档在衍生视图中展示。</p>
               </div>
 
               <div className="space-y-2">
@@ -238,12 +257,13 @@ export function DocEmptyState({ libraries, onAddDoc }: DocEmptyStateProps) {
                   <button
                     key={lib.id}
                     onClick={() => handleConfirmImport(lib.id)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-50 border border-zinc-100 transition-colors text-left"
+                    disabled={isParsing}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-50 border border-zinc-100 transition-colors text-left disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
                       <Folder size={16} />
                     </div>
-                    <span className="text-sm font-medium text-zinc-800">{lib.name}</span>
+                    <span className="text-sm font-medium text-zinc-800">{isParsing ? '正在解析…' : lib.name}</span>
                   </button>
                 ))}
               </div>

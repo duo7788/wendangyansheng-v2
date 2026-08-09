@@ -864,7 +864,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           sourceDocument: { id: doc.id, title: doc.title, content: toAiText(doc.content || getSourceDocumentContent()) },
           role: { id: role.id, name: role.name },
           relatedDocuments,
-          sourceImages,
+          // Image URLs may be embedded Base64 data and exceed Vercel's body
+          // limit. Kimi only needs a stable marker and descriptive text; the
+          // browser already keeps the real URL for rendering.
+          sourceImages: sourceImages.map(({ id, alt }) => ({ id, alt })),
           ...(existingContent ? { existingContent } : {}),
         }),
         signal: controller.signal,

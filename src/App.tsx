@@ -4,6 +4,7 @@ import { Directory } from './components/Directory';
 import { Workspace } from './components/Workspace';
 import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation, ChallengeTask } from './types';
 import { mockChats as initialMockChats, mockLibraries as initialMockLibraries } from './data';
+import { readLocalDocuments, saveLocalDocument } from './lib/localDocumentStore';
 
 export const USERS = [
   { id: 'u_jobs', name: '乔布斯 (产品)', status: 'online', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80' },
@@ -48,6 +49,27 @@ export default function App() {
   const [challengeTasks, setChallengeTasks] = useState<ChallengeTask[]>([]);
   const [taskEntryUnreadCount, setTaskEntryUnreadCount] = useState(0);
   const [taskPulseKey, setTaskPulseKey] = useState(0);
+
+  // A visitor's imported documents (including their embedded images) live in
+  // their own browser. They are never shared with another visitor or sent to
+  // the derivation API as image data.
+  useEffect(() => {
+    let cancelled = false;
+    readLocalDocuments()
+      .then(records => {
+        if (cancelled || !records.length) return;
+        setLibraries(previous => previous.map(library => {
+          const additions = records
+            .filter(record => record.libraryId === library.id && !library.docs.some(doc => doc.id === record.document.id))
+            .map(record => record.document);
+          return additions.length ? { ...library, docs: [...library.docs, ...additions] } : library;
+        }));
+      })
+      // Private-browser persistence is an enhancement; the document still
+      // works during this session when storage is unavailable.
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -294,9 +316,15 @@ export default function App() {
       }
       return lib;
     }));
+    if (doc.isLocalFile) saveLocalDocument({ libraryId: libId, document: doc }).catch(() => undefined);
     setActiveItemId(doc.id);
   };
-  const handleUpdateDoc = (docId: string, patch: Partial<DocItem>) => setLibraries(prev => prev.map(library => ({ ...library, docs: library.docs.map(doc => doc.id === docId ? { ...doc, ...patch, updatedAt: '刚刚' } : doc) })));
+  const handleUpdateDoc = (docId: string, patch: Partial<DocItem>) => setLibraries(prev => prev.map(library => ({ ...library, docs: library.docs.map(doc => {
+    if (doc.id !== docId) return doc;
+    const updated = { ...doc, ...patch, updatedAt: '刚刚' };
+    if (updated.isLocalFile) saveLocalDocument({ libraryId: library.id, document: updated }).catch(() => undefined);
+    return updated;
+  }) })));
 
   const handleSelectApp = (app: AppIdentifier) => {
     setActiveApp(app);

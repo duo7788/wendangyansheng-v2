@@ -138,7 +138,7 @@ export default async function handler(req, res) {
 
     const citationSources = sourceDocumentsForCitation(sourceDocument, relatedDocuments);
     const images = Array.isArray(sourceImages) ? sourceImages.slice(0, 12).flatMap((image, index) => {
-      if (!image?.src || typeof image.alt !== 'string') return [];
+      if (!image?.id || typeof image.alt !== 'string') return [];
       return [{ id: typeof image.id === 'string' ? image.id : `source-image-${index + 1}`, alt: image.alt.trim() || `原文图片 ${index + 1}` }];
     }) : [];
     const hasRelatedSource = citationSources.length > 1;

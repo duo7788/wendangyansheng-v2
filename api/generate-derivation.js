@@ -36,6 +36,26 @@ function contentFromStream(payload) {
   return content;
 }
 
+function sourceDocumentsForCitation(sourceDocument, relatedDocuments) {
+  return [sourceDocument, ...relatedDocuments]
+    .filter(document => document?.id && document?.title && document?.content)
+    .map(document => ({ id: String(document.id), title: String(document.title), content: String(document.content) }));
+}
+
+function validateCitations(content, sourceDocuments) {
+  const sourceById = new Map(sourceDocuments.map(document => [document.id, document]));
+  const citations = [...content.matchAll(/\[\[cite:([^|\]]+)\|([\s\S]*?)\]\]/g)];
+  if (!citations.length) throw new Error('AI 未返回可追溯引用，请重试');
+  for (const citation of citations) {
+    const documentId = citation[1].trim();
+    const quote = citation[2].trim();
+    const source = sourceById.get(documentId);
+    if (!source || quote.length < 12 || quote.length > 120 || !source.content.includes(quote)) {
+      throw new Error('AI 返回了无效引用，请重试');
+    }
+  }
+}
+
 async function saveDerivation(record) {
   const url = required(process.env.SUPABASE_URL, 'SUPABASE_URL');
   const key = required(process.env.SUPABASE_SERVICE_ROLE_KEY, 'SUPABASE_SERVICE_ROLE_KEY');
@@ -66,16 +86,15 @@ export default async function handler(req, res) {
       return json(res, 400, { error: '缺少原始文档或目标角色信息' });
     }
 
-    const relatedContext = relatedDocuments.length
-      ? relatedDocuments.map((doc) => `- ${doc.title}${doc.content ? `：${doc.content}` : ''}`).join('\n')
-      : '无';
+    const citationSources = sourceDocumentsForCitation(sourceDocument, relatedDocuments);
+    const sourceMaterial = citationSources.map(document => `【文档 ID：${document.id}】\n标题：${document.title}\n内容：\n${document.content}`).join('\n\n');
     const factContext = Array.isArray(understanding?.facts) && understanding.facts.length
       ? understanding.facts.map((fact) => `- ${fact.statement}\n  依据：${fact.evidence.map(item => item.quote).join('；')}`).join('\n')
       : null;
     const sourceContext = factContext
-      ? `已完成的文档理解底稿（只能依据以下事实和依据生成）：\n${factContext}`
-      : `原始文档：\n${sourceDocument.content}\n\n关联资料：\n${relatedContext}`;
-    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:原文中连续出现的精确短句]]。\n- cite 内只能复制上方“依据”中连续出现的 12–60 个字符，不能概括、改写或编造；不要在 cite 外展示原文摘录。\n- 无法在原文中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
+      ? `已完成的文档理解底稿（只能依据以下事实和依据生成）：\n${factContext}\n\n引用来源文档：\n${sourceMaterial}`
+      : `来源文档：\n${sourceMaterial}`;
+    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:文档ID|原文中连续出现的精确短句]]。\n- 文档ID 必须逐字使用来源文档中的“文档 ID”；短句必须逐字连续出现于该 ID 对应的文档，长度 12–60 个字符。\n- 不能概括、改写或编造 cite 内容；不要在 cite 外展示原文摘录。\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
 
     const model = process.env.KIMI_MODEL || 'kimi-k2.5';
     // The production Kimi endpoint currently requires temperature 0.6 for
@@ -106,6 +125,7 @@ export default async function handler(req, res) {
     if (!kimiResponse.ok) throw new Error(`Kimi 调用失败：${await kimiResponse.text()}`);
     const content = contentFromStream(await kimiResponse.text());
     if (!content) throw new Error('Kimi 没有返回可用内容');
+    validateCitations(content, citationSources);
 
     const saved = await saveDerivation({
       source_document_id: sourceDocument.id,

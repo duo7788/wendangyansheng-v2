@@ -13,12 +13,6 @@ type CommentAnchor = {
   y: number;
 };
 
-type DerivationUpdate = {
-  roleId: string;
-  targetSourceContentHash: string;
-  status: string;
-};
-
 type MentionMenu = {
   query: string;
   range: Range;
@@ -66,6 +60,13 @@ const hashSourceText = async (content: string) => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
   return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
 };
+
+// A cosmetic edit must not make every role view look stale. This normalized
+// version is shared with the generation API: it intentionally ignores spaces
+// and punctuation, while preserving every meaningful letter and number.
+const meaningfulSourceVersion = (content: string) => content
+  .normalize('NFKC')
+  .replace(/[\s\p{P}\p{S}]+/gu, '');
 
 type InlineCitation = { id: number; quote: string; sourceDocumentId?: string };
 
@@ -344,7 +345,6 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [cancelledRoles, setCancelledRoles] = useState<Set<string>>(new Set());
   const [generatedDerivations, setGeneratedDerivations] = useState<Record<string, GeneratedDerivation>>(storedDerivations);
   const [sourceContentHash, setSourceContentHash] = useState<string | null>(null);
-  const [derivationUpdates, setDerivationUpdates] = useState<DerivationUpdate[]>([]);
   const [isPreparingUpdates, setIsPreparingUpdates] = useState(false);
   const [updatePreparationError, setUpdatePreparationError] = useState('');
   const [generationErrors, setGenerationErrors] = useState<Record<string, string>>({});
@@ -511,23 +511,24 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     return () => { cancelled = true; };
   }, [doc.id, initialRoleId, canManageDerivations, storedDerivations, onStoreGeneratedDerivation, onGeneratedDerivation]);
 
-  // The model receives plain text, so this same normalised value is the
-  // version identity for both generation and later change detection.
-  const sourceTextForAi = toAiText(`${doc.title}\n${doc.content || getSourceDocumentContent()}`);
+  // The model receives plain text. Only the source body participates in the
+  // version identity, so renaming a document does not falsely age its views.
+  const sourceTextForAi = toAiText(doc.content || getSourceDocumentContent());
+  const sourceVersionText = meaningfulSourceVersion(sourceTextForAi);
   const sourceImages = sourceImagesFromContent(doc.content || '');
   useEffect(() => {
     let cancelled = false;
-    void hashSourceText(sourceTextForAi).then(hash => {
+    void hashSourceText(sourceVersionText).then(hash => {
       if (!cancelled) setSourceContentHash(hash);
     });
     return () => { cancelled = true; };
-  }, [sourceTextForAi]);
+  }, [sourceVersionText]);
 
   // This only resets when switching documents. It lets legacy generations
   // without a stored hash still be marked after an edit made in this session.
   useEffect(() => {
     let cancelled = false;
-    void hashSourceText(sourceTextForAi).then(hash => {
+    void hashSourceText(sourceVersionText).then(hash => {
       if (!cancelled) initialSourceHashRef.current = hash;
     });
     return () => { cancelled = true; };
@@ -743,6 +744,15 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   };
 
   const allDocs = libraries.flatMap(lib => lib.docs);
+  // A role's own conversation represents the document owner on that role's
+  // screen. Never offer the current person as a share target.
+  const shareTargets = chats.reduce<Array<{ chat: ChatItem; user: (typeof USERS)[number] }>>((targets, chat) => {
+    const participantId = chat.participantIds?.find(id => id !== activeUserId)
+      || (chat.user.id === activeUserId ? 'u_jobs' : chat.user.id);
+    if (participantId === activeUserId || targets.some(target => target.user.id === participantId)) return targets;
+    const user = USERS.find(candidate => candidate.id === participantId) || chat.user;
+    return [...targets, { chat, user }];
+  }, []);
   const viewingDerivation = viewingDerivativeRole ? generatedDerivations[viewingDerivativeRole] : undefined;
   const sidebarRelatedDocumentIds = Array.from(new Set([
     ...activeDerivativeDocs,
@@ -1029,45 +1039,27 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
 
   const selectedDocs = allDocs.filter(d => selectedDocIds.has(d.id));
   const sourceWasEditedThisSession = Boolean(sourceContentHash && initialSourceHashRef.current && sourceContentHash !== initialSourceHashRef.current);
-  const updateCandidateRoleIds = sourceContentHash ? (Object.entries(generatedDerivations) as Array<[string, GeneratedDerivation]>)
-    .filter(([, derivation]) => derivation.sourceContentHash
-      ? derivation.sourceContentHash !== sourceContentHash
-      : sourceWasEditedThisSession)
-    .map(([roleId]) => roleId) : [];
-  const pendingUpdateRoleIds = new Set(derivationUpdates
-    .filter(update => update.status === 'pending' && update.targetSourceContentHash === sourceContentHash)
-    .map(update => update.roleId));
-  const unpreparedUpdateRoleIds = updateCandidateRoleIds.filter(roleId => !pendingUpdateRoleIds.has(roleId));
+  const updateCandidateRoleIds = sourceWasEditedThisSession && sourceContentHash
+    ? (Object.entries(generatedDerivations) as Array<[string, GeneratedDerivation]>)
+      .filter(([, derivation]) => derivation.sourceContentHash !== sourceContentHash)
+      .map(([roleId]) => roleId)
+    : [];
   const isDerivationOutdated = (roleId: string) => {
     const derivation = generatedDerivations[roleId];
-    return Boolean(sourceContentHash && derivation?.sourceContentHash && derivation.sourceContentHash !== sourceContentHash);
+    return Boolean(sourceWasEditedThisSession && sourceContentHash && derivation?.sourceContentHash !== sourceContentHash);
   };
 
-  const prepareDerivationUpdates = async () => {
-    if (!sourceContentHash || unpreparedUpdateRoleIds.length === 0) return;
+  const refreshAllDerivations = async () => {
+    if (updateCandidateRoleIds.length === 0) return;
     setIsPreparingUpdates(true);
     setUpdatePreparationError('');
     try {
-      const response = await fetch('/api/derivation-updates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sourceDocumentId: doc.id,
-          updates: unpreparedUpdateRoleIds.map(roleId => ({
-            roleId,
-            baseSourceContentHash: generatedDerivations[roleId]?.sourceContentHash || null,
-            targetSourceContentHash: sourceContentHash,
-          })),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || '保存更新状态失败');
-      setDerivationUpdates(previous => {
-        const retained = previous.filter(update => !data.updates.some((item: { role_id: string; target_source_content_hash: string }) => update.roleId === item.role_id && update.targetSourceContentHash === item.target_source_content_hash));
-        return [...retained, ...data.updates.map((item: { role_id: string; target_source_content_hash: string; status: string }) => ({ roleId: item.role_id, targetSourceContentHash: item.target_source_content_hash, status: item.status }))];
-      });
+      await Promise.all(updateCandidateRoleIds.map(roleId => {
+        const derivation = generatedDerivations[roleId];
+        return generateForRole(roleId, derivation?.relatedDocumentIds || [], Boolean(derivation?.visualOverview));
+      }));
     } catch (error) {
-      setUpdatePreparationError(error instanceof Error ? error.message : '保存更新状态失败');
+      setUpdatePreparationError(error instanceof Error ? error.message : '更新衍生文档失败');
     } finally {
       setIsPreparingUpdates(false);
     }
@@ -1540,17 +1532,12 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 {sourceDocuments.map(source => <button key={source.id} type="button" role="tab" aria-selected={activeSourceDocument.id === source.id} onClick={() => setActiveSourceDocumentId(source.id)} className={`inline-flex max-w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors ${activeSourceDocument.id === source.id ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100' : 'text-zinc-600 hover:bg-white/70'}`}><FileText size={14} className={activeSourceDocument.id === source.id ? 'shrink-0 text-indigo-500' : 'shrink-0 text-zinc-400'} /><span className="max-w-52 truncate">{source.title}</span></button>)}
               </div>
             </div>}
-            {canManageDerivations && (unpreparedUpdateRoleIds.length > 0 || pendingUpdateRoleIds.size > 0) && (
+            {canManageDerivations && updateCandidateRoleIds.length > 0 && (
               <div className="mb-7 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-                {unpreparedUpdateRoleIds.length > 0 ? <>
-                  <p className="text-sm font-semibold text-amber-950">原文已修改</p>
-                  <p className="mt-1 text-xs leading-relaxed text-amber-800">{unpreparedUpdateRoleIds.length} 个衍生文档可以准备更新。确认后只会记录待更新状态，不会改写内容或通知角色。</p>
-                  {updatePreparationError && <p className="mt-2 text-xs text-rose-700">{updatePreparationError}</p>}
-                  <button onClick={() => void prepareDerivationUpdates()} disabled={isPreparingUpdates} className="mt-3 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60">{isPreparingUpdates ? '正在确认…' : `确认准备 ${unpreparedUpdateRoleIds.length} 个更新`}</button>
-                </> : <>
-                  <p className="text-sm font-semibold text-amber-950">已确认准备更新</p>
-                  <p className="mt-1 text-xs leading-relaxed text-amber-800">{pendingUpdateRoleIds.size} 个衍生文档已标记为待更新。后续生成局部更新建议后，再由你决定是否发送给角色。</p>
-                </>}
+                <p className="text-sm font-semibold text-amber-950">原文已修改</p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-800">检测到正文内容变化，更新会重新生成此文档的全部 {updateCandidateRoleIds.length} 个衍生文档。</p>
+                {updatePreparationError && <p className="mt-2 text-xs text-rose-700">{updatePreparationError}</p>}
+                <button onClick={() => void refreshAllDerivations()} disabled={isPreparingUpdates} className="mt-3 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60">{isPreparingUpdates ? '正在更新…' : `更新全部 ${updateCandidateRoleIds.length} 个衍生文档`}</button>
               </div>
             )}
             {activeSourceDocument.id !== doc.id ? <>
@@ -2165,7 +2152,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                
                <div className="flex-1 overflow-y-auto min-h-0 -mx-6 px-6">
                  <div className="space-y-1">
-                   {chats.map(chat => {
+                   {shareTargets.map(({ chat, user }) => {
                      const isSelected = selectedShareChatIds.has(chat.id);
                      return (
                        <button
@@ -2183,10 +2170,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                          }`}
                        >
                          <div className="flex items-center gap-3">
-                           <img src={chat.user.avatar} alt={chat.user.name} className="w-8 h-8 rounded-full object-cover shrink-0" />
+                           <img src={user.avatar} alt={user.name} className="w-8 h-8 rounded-full object-cover shrink-0" />
                            <div className="text-left">
                              <div className={`text-sm ${isSelected ? 'font-semibold text-zinc-950' : 'font-medium text-zinc-900'}`}>
-                               {chat.user.name}
+                               {user.name}
                              </div>
                              <div className="text-xs text-zinc-500 truncate max-w-[180px]">
                                {chat.lastMessage}

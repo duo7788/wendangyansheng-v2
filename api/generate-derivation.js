@@ -8,6 +8,12 @@ import { createHash } from 'node:crypto';
 
 const KIMI_API_URL = 'https://api.moonshot.cn/v1/chat/completions';
 
+// Keep source-version semantics consistent with the browser: punctuation and
+// whitespace alone do not require role documents to be regenerated.
+function meaningfulSourceVersion(value) {
+  return String(value || '').normalize('NFKC').replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
 function required(value, name) {
   if (!value) throw new Error(`缺少服务器环境变量：${name}`);
   return value;
@@ -223,10 +229,9 @@ export default async function handler(req, res) {
       related_document_ids: relatedDocuments.map((doc) => doc.id),
       content,
       model,
-      // This is the exact plain-text source sent to the model.  Saving its
-      // hash lets the client later tell which role views are affected by an
-      // original-document edit, without storing another copy of the source.
-      source_content_hash: createHash('sha256').update(sourceDocument.content).digest('hex'),
+      // A semantic source version lets the client ignore punctuation-only
+      // edits while still detecting every meaningful content change.
+      source_content_hash: createHash('sha256').update(meaningfulSourceVersion(sourceDocument.content)).digest('hex'),
     });
     return json(res, 200, { derivation: saved });
   } catch (error) {

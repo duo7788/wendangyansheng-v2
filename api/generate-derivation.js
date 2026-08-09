@@ -42,6 +42,14 @@ function sourceDocumentsForCitation(sourceDocument, relatedDocuments) {
     .map(document => ({ id: String(document.id), title: String(document.title), content: String(document.content) }));
 }
 
+function normalizeCitationText(value) {
+  return value
+    .normalize('NFKC')
+    .replace(/[\s\u00a0]+/g, '')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'");
+}
+
 function validateCitations(content, sourceDocuments) {
   const sourceById = new Map(sourceDocuments.map(document => [document.id, document]));
   const citations = [...content.matchAll(/\[\[cite:([^|\]]+)\|([\s\S]*?)\]\]/g)];
@@ -50,8 +58,10 @@ function validateCitations(content, sourceDocuments) {
     const documentId = citation[1].trim();
     const quote = citation[2].trim();
     const source = sourceById.get(documentId);
-    if (!source || quote.length < 12 || quote.length > 120 || !source.content.includes(quote)) {
-      throw new Error('AI 返回了无效引用，请重试');
+    if (!source) throw new Error('AI 返回了未知来源文档的引用，请重试');
+    if (quote.length < 12 || quote.length > 120) throw new Error('AI 返回的引用长度不正确，请重试');
+    if (!normalizeCitationText(source.content).includes(normalizeCitationText(quote))) {
+      throw new Error('AI 返回的引用在对应文档中找不到，请重试');
     }
   }
 }

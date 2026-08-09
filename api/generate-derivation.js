@@ -158,7 +158,9 @@ export default async function handler(req, res) {
     const sourceContext = factContext
       ? `已完成的文档理解底稿（只能依据以下事实和依据生成）：\n${factContext}\n\n引用来源文档：\n${sourceMaterial}`
       : useBlockCitations ? `来源文档：\n${sourceMaterial}` : `原始文档：\n${sourceMaterial}\n\n关联资料：\n无`;
-    const headingRequirements = hasRelatedSource
+    const headingRequirements = role.id === 'backend'
+      ? `请使用 Markdown，但不要套用固定的四段式模板。根据资料中的实际改动自然组织标题与内容，让后端开发能快速判断实施范围。`
+      : hasRelatedSource
       ? `请使用 Markdown，并严格按以下标题组织：\n# 联合工作标题\n## ${role.name}工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n标题规则：\n- “联合工作标题”必须是 6–18 个中文字符的主题概括，提炼多篇文档共同要解决的业务或研发事项。\n- 不得把文档标题直接拼接、不得使用加号、不得照抄任一文档标题、不得包含角色名称。`
       : `请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项`;
     const citationRequirements = useBlockCitations
@@ -173,7 +175,8 @@ export default async function handler(req, res) {
     const imageInstruction = isCitationRepair
       ? `- 保留已有的 [[image:...]] 图片标记，不要增加、删除或改写它们。`
       : images.length ? `- 原文图片必须全部保留在衍生文档中。图片清单：\n${images.map(image => `  - ${image.id}：${image.alt}`).join('\n')}\n- 为每张图片各输出一次独占一行的 [[image:图片ID]] 标记，放在与图片含义最相关的段落之后；图片标记不是引用，不要添加 cite，也不要解释它。` : `- 原文没有图片，不要输出 [[image:...]] 标记。`;
-    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」完成以下工作：\n\n${taskInstruction}\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n${citationRequirements}\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n图片规则：\n${imageInstruction}\n\n历史逻辑规则：\n${historyLogicInstruction}\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
+    const backendInstruction = role.id === 'backend' ? `\n后端工作视图要求：\n- 优先说清改动点：新增、修改或删除哪些业务对象、接口能力、状态或数据。\n- 必须展开判断逻辑：输入和权限校验、状态流转、优先级、互斥与去重规则、异常路径，以及需要幂等或并发保护的位置。\n- 必须说明回显数据怎么拿：列表、详情或操作完成后分别需要哪些数据；推荐的查询口径、筛选/分页、聚合或空数据处理。\n- 当资料足以支撑时，直接给出推荐的数据表/字段设计，包括字段用途、类型、必填性、默认值、关联关系、唯一约束、索引、状态与时间字段；这些是“推荐设计”，必须用资料中的业务约束解释原因。\n- 当资料不足以支撑具体字段或存量方案时，不得虚构表名、字段或现网行为；清楚写出“待确认”，并指出缺少的口径。\n- 不需要机械地为以上四项设置标题，但输出必须让后端能找到这些信息。\n- 对资料明确的事实、规则和约束，在对应句后保留原文引用；推荐设计可引用其业务依据，但不要把推荐设计伪装成原文事实。\n` : '';
+    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」完成以下工作：\n\n${taskInstruction}${backendInstruction}\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n${citationRequirements}\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n图片规则：\n${imageInstruction}\n\n历史逻辑规则：\n${historyLogicInstruction}\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
 
     const model = process.env.KIMI_MODEL || 'kimi-k2.5';
     // The production Kimi endpoint currently requires temperature 0.6 for

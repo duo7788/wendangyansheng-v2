@@ -10,6 +10,7 @@ create table if not exists public.document_derivations (
   content text not null,
   model text not null,
   source_content_hash text,
+  visual_overview jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (source_document_id, role_id)

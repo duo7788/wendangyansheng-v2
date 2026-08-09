@@ -98,4 +98,10 @@ export interface GeneratedDerivation {
   generatedAt: string;
   sourceContentHash?: string | null;
   visualOverview?: boolean;
+  visualOverviewData?: VisualOverview | null;
+}
+
+export interface VisualOverview {
+  title: string;
+  branches: Array<{ title: string; items: string[] }>;
 }

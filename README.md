@@ -24,6 +24,8 @@
 
 模拟质疑会调用 Kimi，为不同角色生成口语化的专业追问。每次生成及从中添加的任务都会保存到 Supabase，任务完成状态也会同步保存。已部署项目请额外执行 [模拟质疑迁移](supabase/migrations/20260809_document_challenges.sql)；新项目直接执行完整的 [schema.sql](supabase/schema.sql) 即可。
 
+勾选“项目速览”后，系统会额外调用 Kimi 生成一份无引用的思维导图数据，并在浏览器中用 SVG 渲染。已部署项目请额外执行 [项目速览迁移](supabase/migrations/20260809_document_visual_overviews.sql)；新项目直接执行完整的 [schema.sql](supabase/schema.sql) 即可。
+
 生成后的角色版本会在重新打开页面时从 Supabase 读取。当前原型尚未加入登录/成员权限；正式对外使用前，应先加 Supabase Auth，并在 API 中验证用户是否有该文档权限。
 
 ## Run Locally

@@ -205,7 +205,14 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
                             </button>
                             <AnimatePresence>
                               {expandedDerivations[doc.id] && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-4">
-                                {Array.from(appliedRoles).map(roleId => <button key={roleId} onClick={() => setActiveItemId(`${doc.id}|${roleId}`)} className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs ${activeItemId === `${doc.id}|${roleId}` ? 'bg-indigo-50 text-indigo-700' : 'text-zinc-500 hover:bg-zinc-100'}`}><Sparkles size={12} /><span className="truncate">{roleNames[roleId] || '自定义角色'} · 衍生文档</span></button>)}
+                                {Array.from(generatedRoles).map(roleId => {
+                                  const isApplied = appliedRoles.has(roleId);
+                                  return <button key={roleId} onClick={() => setActiveItemId(`${doc.id}|${roleId}`)} className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs ${activeItemId === `${doc.id}|${roleId}` ? 'bg-indigo-50 text-indigo-700' : 'text-zinc-500 hover:bg-zinc-100'}`}>
+                                    <Sparkles size={12} />
+                                    <span className="truncate">{roleNames[roleId] || '自定义角色'} · 衍生文档</span>
+                                    {isApplied && <span className="ml-auto shrink-0 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">已应用</span>}
+                                  </button>;
+                                })}
                               </motion.div>}
                             </AnimatePresence>
                           </div>

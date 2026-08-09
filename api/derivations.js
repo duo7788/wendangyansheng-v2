@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     // `sb_secret_...` keys are sent as apikey only; legacy service_role
     // JWTs additionally use the Authorization header.
     if (key.startsWith('eyJ')) headers.Authorization = `Bearer ${key}`;
-    const response = await fetch(`${url}/rest/v1/document_derivations?source_document_id=eq.${encodeURIComponent(sourceDocumentId)}&select=role_id,content,related_document_ids,source_content_hash,updated_at`, {
+    const response = await fetch(`${url}/rest/v1/document_derivations?source_document_id=eq.${encodeURIComponent(sourceDocumentId)}&select=role_id,content,related_document_ids,source_content_hash,visual_overview,updated_at`, {
       headers,
     });
     if (!response.ok) throw new Error(`读取 Supabase 失败：${await response.text()}`);

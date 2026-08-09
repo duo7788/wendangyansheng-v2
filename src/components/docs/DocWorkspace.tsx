@@ -1,7 +1,7 @@
 import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, PanelLeftOpen, Plus, Eye, MessageCircle, AtSign, ChevronLeft, ChevronRight, PenLine } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { DocItem, DocLibrary, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation, ChallengeTask } from '../../types';
+import { DocItem, DocLibrary, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation, ChallengeTask, VisualOverview } from '../../types';
 import { formatPlainTextAsDocument } from './DocEmptyState';
 import { USERS } from '../../App';
 
@@ -26,7 +26,7 @@ type MentionMenu = {
   y: number;
 };
 
-type ChallengeMessage = { role: { id: string; name: string }; content: string };
+type ChallengeMessage = { role: { id: string; name: string }; content: string; isConflict?: boolean };
 
 // The current prototype keeps its source document in the editor markup rather
 // than a database.  This supplies that same source to Kimi until document
@@ -169,16 +169,33 @@ const RenderedDerivation = ({ content, hideLeadingTitle = false, sourceText, cit
   return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(visibleLines, 'line', onCitationClick, activeCitation?.id, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers)}</article>;
 };
 
-const ProjectOverview = ({ title, roleName }: { title: string; roleName: string }) => (
-  <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/70 via-white to-violet-50/50 p-7">
-    <div className="mb-7"><p className="text-xs font-semibold tracking-wide text-indigo-600">PROJECT OVERVIEW</p><h2 className="mt-2 text-xl font-semibold text-zinc-900">{title}</h2><p className="mt-2 text-sm text-zinc-500">给 {roleName} 的项目进入速览：先理解目标、协作关系与下一步。</p></div>
-    <div className="grid gap-3 sm:grid-cols-[1fr_1.15fr_1fr] sm:items-center">
-      <div className="space-y-3"><div className="rounded-xl border border-white bg-white/90 p-3 shadow-sm"><p className="text-xs font-medium text-zinc-400">项目目标</p><p className="mt-1 text-sm font-semibold text-zinc-800">统一体验与交付节奏</p></div><div className="rounded-xl border border-white bg-white/90 p-3 shadow-sm"><p className="text-xs font-medium text-zinc-400">关键约束</p><p className="mt-1 text-sm font-semibold text-zinc-800">质量、依赖、验收</p></div></div>
-      <div className="relative flex min-h-36 items-center justify-center"><span className="absolute h-px w-full bg-indigo-200" /><div className="relative rounded-2xl border border-indigo-200 bg-indigo-600 px-5 py-4 text-center text-white shadow-lg shadow-indigo-200/60"><p className="text-[11px] font-medium text-indigo-100">当前项目</p><p className="mt-1 text-sm font-semibold">{title}</p></div></div>
-      <div className="space-y-3"><div className="rounded-xl border border-white bg-white/90 p-3 shadow-sm"><p className="text-xs font-medium text-zinc-400">你的角色</p><p className="mt-1 text-sm font-semibold text-zinc-800">{roleName}</p></div><div className="rounded-xl border border-white bg-white/90 p-3 shadow-sm"><p className="text-xs font-medium text-zinc-400">下一步</p><p className="mt-1 text-sm font-semibold text-zinc-800">确认范围并提出问题</p></div></div>
+const MindMapOverview = ({ overview, roleName }: { overview: VisualOverview; roleName: string }) => {
+  const positions = [[72, 56], [572, 56], [72, 248], [572, 248]];
+  return <section className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-6">
+    <div className="mb-5"><p className="text-xs font-semibold tracking-wide text-zinc-500">PROJECT OVERVIEW</p><p className="mt-2 text-sm text-zinc-500">为 {roleName} 整理的项目速览</p></div>
+    <div className="overflow-x-auto pb-1">
+      <div className="relative mx-auto h-[410px] min-w-[760px] rounded-xl border border-zinc-200 bg-white" aria-label={`${overview.title}项目思维导图`}>
+        <svg aria-hidden="true" viewBox="0 0 760 410" className="absolute inset-0 h-full w-full">
+          {overview.branches.slice(0, 4).map((branch, index) => {
+            const [x, y] = positions[index];
+            const isKey = /风险|待确认|关键/.test(branch.title);
+            const targetX = x < 380 ? x + 184 : x;
+            return <path key={branch.title} d={`M380 205 C380 ${y + 46}, ${targetX} ${y + 46}, ${targetX} ${y + 46}`} fill="none" stroke={isKey ? '#7C3AED' : '#D4D4D8'} strokeWidth="1.5" />;
+          })}
+        </svg>
+        <div className="absolute left-1/2 top-1/2 z-10 w-44 -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-zinc-950 px-4 py-4 text-center text-sm font-semibold leading-5 text-white shadow-lg">{overview.title}</div>
+        {overview.branches.slice(0, 4).map((branch, index) => {
+          const [left, top] = positions[index];
+          const isKey = /风险|待确认|关键/.test(branch.title);
+          return <div key={branch.title} style={{ left, top }} className={`absolute w-[184px] rounded-xl border p-3 ${isKey ? 'border-violet-200 bg-violet-50' : 'border-zinc-200 bg-white'}`}>
+            <p className={`text-xs font-semibold ${isKey ? 'text-violet-700' : 'text-zinc-800'}`}>{branch.title}</p>
+            <ul className="mt-2 space-y-1.5">{branch.items.map(item => <li key={item} className="flex gap-1.5 text-[11px] leading-4 text-zinc-600"><span className={`mt-1.5 h-1 w-1 shrink-0 rounded-full ${isKey ? 'bg-violet-500' : 'bg-zinc-400'}`} />{item}</li>)}</ul>
+          </div>;
+        })}
+      </div>
     </div>
-  </div>
-);
+  </section>;
+};
 
 const PIXEL_ROLE_COLORS: Record<string, string> = {
   backend: '#18181B',
@@ -248,6 +265,7 @@ interface DocWorkspaceProps {
 export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, storedDerivations, onStoreGeneratedDerivation, derivationSnapshots, onRecordDerivationSnapshot, canManageDerivations, comments, onAddComment, onResolveComment, activeUserId, onAddChallengeTask, reviewMode = false }: DocWorkspaceProps) {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [isChallengeModalOpen, setIsChallengeModalOpen] = useState(false);
+  const [isChallengeMenuOpen, setIsChallengeMenuOpen] = useState(false);
   const [isChallengePanelOpen, setIsChallengePanelOpen] = useState(false);
   const [challengeRoleIds, setChallengeRoleIds] = useState<Set<string>>(new Set());
   const [challengeSentencesPerRole, setChallengeSentencesPerRole] = useState<1 | 2>(2);
@@ -259,6 +277,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [isChallengeLoading, setIsChallengeLoading] = useState(false);
   const [challengeError, setChallengeError] = useState('');
   const [challengeRunId, setChallengeRunId] = useState<string | null>(null);
+  const [latestChallengeRun, setLatestChallengeRun] = useState<{ id: string; challenges: ChallengeMessage[]; createdAt: string } | null>(null);
   const [savingChallengeTaskKeys, setSavingChallengeTaskKeys] = useState<Set<string>>(new Set());
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set<string>(initialRoleId ? [initialRoleId] : []));
@@ -362,9 +381,61 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     setGeneratedDerivations(storedDerivations);
   }, [storedDerivations]);
 
+  // The document owner needs the complete generated-role index, not only the
+  // roles that have been applied. This restores successful generations after
+  // a refresh so the directory remains an accurate entry point to each view.
   useEffect(() => {
-    if (initialRoleId && generatedDerivations[initialRoleId]?.visualOverview) setDerivativePackageTab('overview');
+    if (!canManageDerivations) return;
+    let cancelled = false;
+    fetch(`/api/derivations?sourceDocumentId=${encodeURIComponent(doc.id)}`)
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('无法读取衍生文档')))
+      .then(data => {
+        if (cancelled) return;
+        const derivations = (data.derivations || []).flatMap((item: { role_id?: string; content?: string; related_document_ids?: string[]; source_content_hash?: string | null; visual_overview?: VisualOverview | null; updated_at?: string }) => {
+          if (!item.role_id || !item.content) return [];
+          return [[item.role_id, {
+            content: item.content,
+            relatedDocumentIds: item.related_document_ids || [],
+            sourceContentHash: item.source_content_hash || null,
+            generatedAt: item.updated_at || '',
+            visualOverview: Boolean(item.visual_overview),
+            visualOverviewData: item.visual_overview || null,
+          }] as const];
+        });
+        if (!derivations.length) return;
+        setGeneratedDerivations(previous => ({ ...Object.fromEntries(derivations), ...previous }));
+        derivations.forEach(([roleId, derivation]) => {
+          onStoreGeneratedDerivation(doc.id, roleId, derivation);
+          onGeneratedDerivation(doc.id, roleId);
+        });
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [doc.id, canManageDerivations, onStoreGeneratedDerivation, onGeneratedDerivation]);
+
+  useEffect(() => {
+    if (initialRoleId && generatedDerivations[initialRoleId]?.visualOverviewData) setDerivativePackageTab('overview');
   }, [initialRoleId, generatedDerivations]);
+
+  // The latest successful run determines whether the challenge action offers
+  // a history entry point or opens the creation configuration directly.
+  useEffect(() => {
+    setLatestChallengeRun(null);
+    if (!canManageDerivations) return;
+    let cancelled = false;
+    fetch(`/api/generate-challenges?sourceDocumentId=${encodeURIComponent(doc.id)}`)
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('无法读取模拟质疑')))
+      .then(data => {
+        if (cancelled || !data.run?.id || !Array.isArray(data.run.challenges)) return;
+        const challenges = data.run.challenges.flatMap((item: { role_id?: string; role_name?: string; content?: string; is_conflict?: boolean }) => {
+          if (!item.role_id || !item.role_name || !item.content) return [];
+          return [{ role: { id: item.role_id, name: item.role_name }, content: item.content, isConflict: item.is_conflict === true }];
+        });
+        if (challenges.length) setLatestChallengeRun({ id: data.run.id, challenges, createdAt: data.run.created_at || '' });
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [doc.id, canManageDerivations]);
 
   // A source document deliberately opens clean. Only a recipient entering an
   // already-applied role view may load that role's saved full document.
@@ -382,6 +453,8 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           relatedDocumentIds: item.related_document_ids || [],
           sourceContentHash: item.source_content_hash || null,
           generatedAt: item.updated_at || '',
+          visualOverview: Boolean(item.visual_overview),
+          visualOverviewData: item.visual_overview || null,
         };
         setGeneratedDerivations(previous => ({ ...previous, [initialRoleId]: derivation }));
         onStoreGeneratedDerivation(doc.id, initialRoleId, derivation);
@@ -519,6 +592,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       setChallengeRun(run);
       setChallengeMessages(data.challenges);
       setChallengeRunId(data.run.id);
+      setLatestChallengeRun({ id: data.run.id, challenges: data.challenges, createdAt: data.run.created_at || '' });
     } catch (error) {
       setChallengeError(error instanceof Error ? error.message : '生成模拟质疑失败');
     } finally {
@@ -533,6 +607,18 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     setIsSidebarOpen(false);
     setIsChallengePanelOpen(true);
     void generateChallenges(0);
+  };
+  const viewExistingChallenge = () => {
+    if (!latestChallengeRun) return;
+    setChallengeMessages(latestChallengeRun.challenges);
+    setChallengeRunId(latestChallengeRun.id);
+    setChallengeTurn(latestChallengeRun.challenges.length);
+    setIsChallengeStopped(false);
+    setChallengeError('');
+    setIsChallengeMenuOpen(false);
+    setIsCommentPanelOpen(false);
+    setIsSidebarOpen(false);
+    setIsChallengePanelOpen(true);
   };
   const restartChallenge = () => {
     void generateChallenges(challengeRun + 1);
@@ -704,7 +790,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     }
   };
 
-  const generateForRole = async (roleId: string, relatedDocIds: string[], withVisualOverview = generatedDerivations[roleId]?.visualOverview || includeVisualOverview, existingContent?: string) => {
+  const generateForRole = async (roleId: string, relatedDocIds: string[], withVisualOverview = Boolean(generatedDerivations[roleId]?.visualOverview) || includeVisualOverview, existingContent?: string) => {
     const role = roles.find(item => item.id === roleId);
     if (!role) return;
     const previousDerivation = generatedDerivations[roleId];
@@ -749,8 +835,29 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         relatedDocumentIds: data.derivation.related_document_ids || relatedDocIds,
         sourceContentHash: data.derivation.source_content_hash || null,
         generatedAt: data.derivation.updated_at,
-        visualOverview: withVisualOverview,
+        visualOverview: false,
       };
+      if (withVisualOverview) {
+        try {
+          const overviewResponse = await fetch('/api/generate-overview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sourceDocument: { id: doc.id, title: doc.title, content: toAiText(doc.content || getSourceDocumentContent()) },
+              relatedDocuments,
+              role: { id: role.id, name: role.name },
+            }),
+            signal: controller.signal,
+          });
+          const overviewData = await overviewResponse.json();
+          if (!overviewResponse.ok || !overviewData.overview) throw new Error(overviewData.error || '生成项目速览失败');
+          derivation.visualOverview = true;
+          derivation.visualOverviewData = overviewData.overview;
+        } catch (overviewError) {
+          if (controller.signal.aborted) return;
+          setGenerationErrors(prev => ({ ...prev, [roleId]: `角色文档已生成，但项目速览生成失败：${overviewError instanceof Error ? overviewError.message : '请稍后重试'}` }));
+        }
+      }
       setGeneratedDerivations(prev => ({ ...prev, [roleId]: derivation }));
       onGeneratedDerivation(doc.id, roleId);
       onStoreGeneratedDerivation(doc.id, roleId, derivation);
@@ -855,7 +962,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       setIsRestoringOriginal(true);
       setViewingDerivativeRole(null);
       derivativeViewTimerRef.current = window.setTimeout(() => {
-        setDerivativePackageTab(generatedDerivations[roleId]?.visualOverview ? 'overview' : 'document');
+        setDerivativePackageTab(generatedDerivations[roleId]?.visualOverviewData ? 'overview' : 'document');
         setViewingDerivativeRole(roleId);
         setIsRestoringOriginal(false);
         setPendingDerivativeRole(null);
@@ -865,7 +972,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     }
 
     setViewingDerivativeRole(roleId);
-    setDerivativePackageTab(generatedDerivations[roleId]?.visualOverview ? 'overview' : 'document');
+    setDerivativePackageTab(generatedDerivations[roleId]?.visualOverviewData ? 'overview' : 'document');
   };
 
   const selectedDocs = allDocs.filter(d => selectedDocIds.has(d.id));
@@ -1268,9 +1375,17 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               分享
             </button>
             {canManageDerivations && <>
-              <button onClick={() => setIsChallengeModalOpen(true)} className="ml-3 flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-200">
-                <MessageSquare size={16} /> 模拟质疑
-              </button>
+              <div className="relative ml-3">
+                <button onClick={() => { setIsDerivativeMenuOpen(false); latestChallengeRun ? setIsChallengeMenuOpen(open => !open) : setIsChallengeModalOpen(true); }} className="flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-200">
+                  <MessageSquare size={16} /> 模拟质疑
+                </button>
+                <AnimatePresence>
+                  {isChallengeMenuOpen && latestChallengeRun && <motion.div initial={{ opacity: 0, y: -6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.98 }} className="absolute left-0 top-[calc(100%+8px)] z-40 w-48 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-lg">
+                    <button onClick={viewExistingChallenge} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-50"><Eye size={15} className="text-zinc-600" />查看已有质疑</button>
+                    <button onClick={() => { setIsChallengeMenuOpen(false); setIsChallengeModalOpen(true); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-50"><Plus size={15} className="text-zinc-600" />创建新质疑</button>
+                  </motion.div>}
+                </AnimatePresence>
+              </div>
               <span aria-hidden="true" className="mx-5 h-6 w-px bg-zinc-200" />
               <div className="relative">
                 <button
@@ -1479,11 +1594,11 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               
               {generatedDerivations[viewingDerivativeRole] ? (
                 <>
-                  {generatedDerivations[viewingDerivativeRole].visualOverview && <div className="mb-6 flex w-fit rounded-xl bg-zinc-100 p-1" role="tablist" aria-label="衍生文档内容">
+                  {generatedDerivations[viewingDerivativeRole].visualOverviewData && <div className="mb-6 flex w-fit rounded-xl bg-zinc-100 p-1" role="tablist" aria-label="衍生文档内容">
                     <button role="tab" aria-selected={derivativePackageTab === 'overview'} onClick={() => setDerivativePackageTab('overview')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'overview' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'overview' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">项目速览</span></button>
                     <button role="tab" aria-selected={derivativePackageTab === 'document'} onClick={() => setDerivativePackageTab('document')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'document' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'document' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">角色文档</span></button>
                   </div>}
-                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverview ? <ProjectOverview title={viewingDerivation?.relatedDocumentIds.length ? derivationTitle(viewingDerivation.content, '联合工作视图') : doc.title} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} hideLeadingTitle={Boolean(viewingDerivation?.relatedDocumentIds.length)} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
+                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverviewData ? <MindMapOverview overview={generatedDerivations[viewingDerivativeRole].visualOverviewData} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} hideLeadingTitle={Boolean(viewingDerivation?.relatedDocumentIds.length)} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
                 </>
               ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed">
@@ -1600,8 +1715,9 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                       const isChallengeComplete = challengeTurn >= challengeMessages.length;
                       return <motion.div ref={node => { if (isSpeaking) activeChallengeItemRef.current = node; }} key={`${message.role.id}-${messageIndex}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }} className={`group/message flex items-end gap-4 ${isRightAligned ? 'flex-row-reverse' : ''}`}>
                         <PixelSpeaker roleId={message.role.id} roleName={message.role.name} speaking={isSpeaking} flipped={isRightAligned} />
-                        <div className={`relative max-w-[232px] rounded-2xl px-3.5 py-3 text-xs font-medium leading-5 transition-colors ${isSpeaking ? 'bg-zinc-200 text-zinc-900' : 'bg-zinc-100 text-zinc-600'} ${isRightAligned ? 'rounded-br-md' : 'rounded-bl-md'}`}>
+                        <div className={`relative max-w-[232px] rounded-2xl px-3.5 py-3 text-xs font-medium leading-5 transition-colors ${message.isConflict ? (isSpeaking ? 'bg-rose-100 text-rose-950 ring-1 ring-rose-200' : 'bg-rose-50 text-rose-800 ring-1 ring-rose-100') : (isSpeaking ? 'bg-zinc-200 text-zinc-900' : 'bg-zinc-100 text-zinc-600')} ${isRightAligned ? 'rounded-br-md' : 'rounded-bl-md'}`}>
                           <span aria-hidden="true" className={`absolute bottom-0 h-4 w-3 bg-inherit ${isRightAligned ? '-right-3 -scale-x-100 [clip-path:polygon(100%_0,100%_100%,0_100%)]' : '-left-3 [clip-path:polygon(100%_0,100%_100%,0_100%)]'}`} />
+                          {message.isConflict && <span className="mb-1.5 block text-[10px] font-semibold tracking-wide text-rose-600">需重点核对</span>}
                           <span className="relative">{isSpeaking ? message.content.slice(0, typedChallengeLength) : message.content}</span>
                           {canAddTask && <button type="button" onClick={() => void addChallengeTask(messageIndex)} disabled={taskAdded || isSavingTask} aria-label={taskAdded ? '已添加到任务' : isSavingTask ? '正在保存任务' : '添加到任务'} className={`group/task absolute -bottom-3 ${isRightAligned ? '-left-3' : '-right-3'} flex h-7 w-7 items-center justify-center rounded-full border text-xs transition-colors ${isChallengeComplete ? 'pointer-events-none opacity-0 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100' : ''} ${taskAdded || isSavingTask ? 'border-zinc-300 bg-zinc-200 text-zinc-500' : 'border-zinc-200 bg-white text-zinc-700 shadow-sm hover:border-zinc-900 hover:bg-zinc-900 hover:text-white'}`}><Plus size={14} />{!taskAdded && !isSavingTask && <span role="tooltip" className="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition-none group-hover/task:opacity-100 group-focus-visible/task:opacity-100">添加到任务</span>}</button>}
                         </div>

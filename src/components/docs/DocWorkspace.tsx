@@ -1633,7 +1633,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 // A missing inline marker is a real data-quality issue: the
                 // renderer cannot highlight a source that was never saved.
                 // Expose an explicit repair action instead of concealing it.
-                const needsCitationRepair = Boolean(derivation && (derivation.content.includes(']]') || !derivation.content.includes('[[cite:')));
+                const contentWithoutValidCitations = derivation?.content.replace(/\[\[cite:[\s\S]*?\]\]/g, '') || '';
+                const hasMalformedCitation = Boolean(derivation?.content.split('\n').some(line => line.includes('[[cite:') && !line.includes(']]')));
+                const hasOrphanCitationEnding = contentWithoutValidCitations.includes(']]');
+                const needsCitationRepair = Boolean(derivation && (!derivation.content.includes('[[cite:') || hasMalformedCitation || hasOrphanCitationEnding));
                 
                 return (
                   <section key={roleId} className="group relative mx-5 my-3 overflow-hidden rounded-[18px] border border-zinc-200 bg-white p-4 transition-[height,background-color] duration-200 hover:bg-zinc-50">

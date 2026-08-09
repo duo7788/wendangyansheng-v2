@@ -84,10 +84,24 @@ const citationContext = (source: string, quote: string) => {
   };
 };
 
+const HistoryLogicTag = ({ source }: { source: string; key?: string }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  return <span className="relative ml-1 inline-block align-baseline">
+    <button type="button" aria-expanded={isOpen} onClick={event => { event.stopPropagation(); setIsOpen(open => !open); }} className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800 transition-colors hover:border-emerald-300 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-200">历史逻辑</button>
+    {isOpen && <span className="absolute bottom-[calc(100%+10px)] left-1/2 z-30 block w-72 -translate-x-1/2 rounded-xl border border-zinc-200 bg-white p-3 text-left shadow-xl">
+      <span className="block text-[11px] font-medium text-zinc-400">代码来源</span>
+      <span className="mt-1.5 block cursor-default break-all text-xs font-medium text-blue-600 underline underline-offset-2">{source}</span>
+      <span className="mt-2 block text-[11px] leading-relaxed text-zinc-400">历史逻辑仅展示来源，不支持查看</span>
+      <span aria-hidden="true" className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-zinc-200 bg-white" />
+    </span>}
+  </span>;
+};
+
 const renderInlineMarkdown = (text: string, keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '', citationSourceTexts: Record<string, string> = {}, citationNumbers: Record<string, number> = {}): ReactNode[] => {
-  const tokens = text.split(/(\[\[cite:[\s\S]*?\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+  const tokens = text.split(/(\[\[cite:[\s\S]*?\]\]|\[\[history:[^\]]+\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
   return tokens.map((token, index) => {
     const key = `${keyPrefix}-${index}`;
+    if (token.startsWith('[[history:') && token.endsWith(']]')) return <HistoryLogicTag key={key} source={token.slice(10, -2).trim()} />;
     if (token.startsWith('[[cite:') && token.endsWith(']]')) {
       const rawCitation = token.slice(7, -2).trim();
       const separator = rawCitation.indexOf('|');

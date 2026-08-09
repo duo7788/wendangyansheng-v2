@@ -98,6 +98,13 @@ function validateCitations(content, sourceDocuments) {
   }
 }
 
+function validateHistoryMarkers(content) {
+  const markers = [...content.matchAll(/\[\[history:([^\]]+)\]\]/g)].map(match => match[1].trim());
+  if (markers.length !== 2 || markers.some(marker => !/^legacy\/[a-z0-9_./-]+\.(?:ts|tsx|js)$/i.test(marker))) {
+    throw new Error('AI 未能生成两个有效的历史逻辑提示，请重试');
+  }
+}
+
 async function saveDerivation(record) {
   const url = required(process.env.SUPABASE_URL, 'SUPABASE_URL');
   const key = required(process.env.SUPABASE_SERVICE_ROLE_KEY, 'SUPABASE_SERVICE_ROLE_KEY');
@@ -155,7 +162,10 @@ export default async function handler(req, res) {
     const taskInstruction = isCitationRepair
       ? `下面是已有的角色工作视图。请修复其中的引用：保留标题、段落、表格、行动项和正文措辞，不要重新总结或增删业务内容；删除其中残缺的 ]] 或旧引用标记，并为每个关键结论或行动项补上正确引用。\n\n已有角色工作视图：\n${existingContent}`
       : `请生成一份可执行的中文工作视图。\n\n${headingRequirements}`;
-    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」完成以下工作：\n\n${taskInstruction}\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n${citationRequirements}\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
+    const historyLogicInstruction = isCitationRepair
+      ? `- 保留已有的 [[history:...]] 历史逻辑标记，不要增加、删除或改写它们。`
+      : `- 在全文中恰好插入 2 个 [[history:代码路径]] 标记。它们必须附在 ${role.name} 需要额外关注的独立提醒句末尾，不能附在任何原文结论、行动项或原文引用后；这两句用于模拟该角色从历史代码库发现的既有处理约束，不是原文信息，也不需要 cite 引用。代码路径必须是看起来真实的 legacy/ 模块路径，例如 [[history:legacy/entitlements/priority-policy.ts]]。不要解释标记，也不要在同一句放置 cite 和 history 标记。`;
+    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」完成以下工作：\n\n${taskInstruction}\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n${citationRequirements}\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n历史逻辑规则：\n${historyLogicInstruction}\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
 
     const model = process.env.KIMI_MODEL || 'kimi-k2.5';
     // The production Kimi endpoint currently requires temperature 0.6 for
@@ -191,6 +201,7 @@ export default async function handler(req, res) {
     // path, where a source identifier is required for cross-document lookup.
     const content = useBlockCitations ? resolveBlockCitations(responseContent, citationBlocks) : responseContent;
     if (useBlockCitations) validateCitations(content, citationSources);
+    if (!isCitationRepair) validateHistoryMarkers(content);
     if (isCitationRepair && !content.includes('[[cite:')) throw new Error('AI 未能修复出有效引用，请重试');
 
     const saved = await saveDerivation({

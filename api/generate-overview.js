@@ -58,7 +58,13 @@ export default async function handler(req, res) {
     const save = await fetch(`${url}/rest/v1/document_derivations?source_document_id=eq.${encodeURIComponent(sourceDocument.id)}&role_id=eq.${encodeURIComponent(role.id)}`, {
       method: 'PATCH', headers: supabaseHeaders(), body: JSON.stringify({ visual_overview: overview }),
     });
-    if (!save.ok) throw new Error(`保存项目速览失败：${await save.text()}`);
+    if (!save.ok) {
+      const details = await save.text();
+      if (details.includes("visual_overview") && details.includes('schema cache')) {
+        throw new Error('项目速览尚未完成数据库配置。请在 Supabase SQL Editor 执行 20260809_document_visual_overviews.sql 后重试。');
+      }
+      throw new Error(`保存项目速览失败：${details}`);
+    }
     return json(res, 200, { overview });
   } catch (error) {
     return json(res, 500, { error: error instanceof Error ? error.message : '生成项目速览失败' });

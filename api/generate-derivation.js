@@ -42,6 +42,36 @@ function sourceDocumentsForCitation(sourceDocument, relatedDocuments) {
     .map(document => ({ id: String(document.id), title: String(document.title), content: String(document.content) }));
 }
 
+function buildCitationBlocks(sourceDocuments) {
+  return sourceDocuments.flatMap((document, documentIndex) => {
+    const lines = document.content.replace(/\r\n/g, '\n').split('\n').map(line => line.trim()).filter(Boolean);
+    let sequence = 0;
+    const prefix = documentIndex === 0 ? 'S' : `R${documentIndex}-`;
+    return lines.flatMap(line => {
+      const chunks = line.match(/.{1,100}/g) || [];
+      return chunks.filter(chunk => chunk.length >= 12).map(text => ({
+        id: `${prefix}${++sequence}`,
+        documentId: document.id,
+        text,
+      }));
+    });
+  });
+}
+
+function resolveBlockCitations(content, blocks) {
+  const blockById = new Map(blocks.map(block => [block.id, block]));
+  let hadCitation = false;
+  const resolved = content.replace(/\[\[cite:([^\]|]+)\]\]/g, (marker, blockId) => {
+    hadCitation = true;
+    const block = blockById.get(blockId.trim());
+    if (!block) throw new Error('AI 返回了未知原文块的引用，请重试');
+    return `[[cite:${block.documentId}|${block.text}]]`;
+  });
+  if (!hadCitation) throw new Error('AI 未返回可追溯引用，请重试');
+  if (/\[\[cite:/.test(resolved)) throw new Error('AI 返回了不完整的引用标记，请重试');
+  return resolved;
+}
+
 function normalizeCitationText(value) {
   return value
     .normalize('NFKC')
@@ -97,7 +127,12 @@ export default async function handler(req, res) {
     }
 
     const citationSources = sourceDocumentsForCitation(sourceDocument, relatedDocuments);
-    const sourceMaterial = citationSources.map(document => `【文档 ID：${document.id}】\n标题：${document.title}\n内容：\n${document.content}`).join('\n\n');
+    const citationBlocks = buildCitationBlocks(citationSources);
+    if (!citationBlocks.length) throw new Error('来源文档中没有可用于引用的文本');
+    const sourceMaterial = citationSources.map(document => {
+      const blocks = citationBlocks.filter(block => block.documentId === document.id);
+      return `【文档：${document.title}】\n${blocks.map(block => `[${block.id}] ${block.text}`).join('\n')}`;
+    }).join('\n\n');
     const factContext = Array.isArray(understanding?.facts) && understanding.facts.length
       ? understanding.facts.map((fact) => `- ${fact.statement}\n  依据：${fact.evidence.map(item => item.quote).join('；')}`).join('\n')
       : null;
@@ -108,7 +143,7 @@ export default async function handler(req, res) {
     const headingRequirements = hasRelatedSource
       ? `请使用 Markdown，并严格按以下标题组织：\n# 联合工作标题\n## ${role.name}工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项\n\n标题规则：\n- “联合工作标题”必须是 6–18 个中文字符的主题概括，提炼多篇文档共同要解决的业务或研发事项。\n- 不得把文档标题直接拼接、不得使用加号、不得照抄任一文档标题、不得包含角色名称。`
       : `请使用 Markdown，并严格按以下标题组织：\n# 角色工作视图\n## 核心目标\n## 需要关注的内容\n## 行动清单\n## 风险与待确认事项`;
-    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n${headingRequirements}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:文档ID|原文中连续出现的精确短句]]。\n- 文档ID 必须逐字使用来源文档中的“文档 ID”；短句必须逐字连续出现于该 ID 对应的文档，长度 12–60 个字符。\n- 不能概括、改写或编造 cite 内容；不要在 cite 外展示原文摘录。\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
+    const prompt = `你是企业产品研发协作助手。请只依据提供的资料，为「${role.name}」生成一份可执行的中文工作视图。\n\n原始文档标题：${sourceDocument.title}\n${sourceContext}\n\n${headingRequirements}\n\n引用规则：\n- 不要输出“原文依据”章节、附录或参考文献列表。\n- 对每个关键结论或行动项，在对应句子末尾嵌入 1 个引用，格式必须是 [[cite:原文块ID]]。示例：[[cite:S1]]；关联文档的块会是 [[cite:R1-1]]。\n- 原文块ID 必须从资料中方括号标出的短 ID 原样复制。S 开头代表主文档，R 开头代表关联文档。\n- 不要填写文档标题或文档 ID，不要复制原文短句，不要编造或省略引用标记。\n- 无法在任一来源文档中找到准确依据时，写“待确认”，不要添加引用。\n\n不要编造资料中不存在的事实；不确定时明确标注“待确认”。`;
 
     const model = process.env.KIMI_MODEL || 'kimi-k2.5';
     // The production Kimi endpoint currently requires temperature 0.6 for
@@ -137,8 +172,9 @@ export default async function handler(req, res) {
       }),
     });
     if (!kimiResponse.ok) throw new Error(`Kimi 调用失败：${await kimiResponse.text()}`);
-    const content = contentFromStream(await kimiResponse.text());
-    if (!content) throw new Error('Kimi 没有返回可用内容');
+    const responseContent = contentFromStream(await kimiResponse.text());
+    if (!responseContent) throw new Error('Kimi 没有返回可用内容');
+    const content = resolveBlockCitations(responseContent, citationBlocks);
     validateCitations(content, citationSources);
 
     const saved = await saveDerivation({

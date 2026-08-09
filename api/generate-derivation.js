@@ -60,16 +60,19 @@ function buildCitationBlocks(sourceDocuments) {
 
 function resolveBlockCitations(content, blocks) {
   const blockById = new Map(blocks.map(block => [block.id, block]));
-  let hadCitation = false;
-  const resolved = content.replace(/\[\[cite:([^\]|]+)\]\]/g, (marker, blockId) => {
-    hadCitation = true;
-    const block = blockById.get(blockId.trim());
-    if (!block) throw new Error('AI 返回了未知原文块的引用，请重试');
+  const resolved = content.replace(/\[\[cite:([^\]]*)\]\]/g, (marker, rawReference) => {
+    // A model can occasionally append an old-style quote after the block id.
+    // The leading id remains enough to produce a grounded, exact citation.
+    const blockId = rawReference.split('|', 1)[0].trim();
+    const block = blockById.get(blockId);
+    // Citation formatting should never make an otherwise useful role view
+    // disappear. Drop an unknown marker rather than inventing a source.
+    if (!block) return '';
     return `[[cite:${block.documentId}|${block.text}]]`;
   });
-  if (!hadCitation) throw new Error('AI 未返回可追溯引用，请重试');
-  if (/\[\[cite:/.test(resolved)) throw new Error('AI 返回了不完整的引用标记，请重试');
-  return resolved;
+  // Recover from a stream ending halfway through a marker. Removing only the
+  // marker keeps the generated statement while avoiding raw syntax in the UI.
+  return resolved.replace(/\[\[cite:[^\s\]]*/g, '');
 }
 
 function normalizeCitationText(value) {
@@ -83,7 +86,6 @@ function normalizeCitationText(value) {
 function validateCitations(content, sourceDocuments) {
   const sourceById = new Map(sourceDocuments.map(document => [document.id, document]));
   const citations = [...content.matchAll(/\[\[cite:([^|\]]+)\|([\s\S]*?)\]\]/g)];
-  if (!citations.length) throw new Error('AI 未返回可追溯引用，请重试');
   for (const citation of citations) {
     const documentId = citation[1].trim();
     const quote = citation[2].trim();

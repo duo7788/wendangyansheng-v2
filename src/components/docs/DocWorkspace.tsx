@@ -88,11 +88,11 @@ const HistoryLogicTag = ({ source }: { source: string; key?: string }) => {
   const [isOpen, setIsOpen] = useState(false);
   return <span className="relative ml-1 inline-block align-baseline">
     <button type="button" aria-expanded={isOpen} onClick={event => { event.stopPropagation(); setIsOpen(open => !open); }} className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800 transition-colors hover:border-emerald-300 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-200">历史逻辑</button>
-    {isOpen && <span className="absolute bottom-[calc(100%+10px)] left-1/2 z-30 block w-72 -translate-x-1/2 rounded-xl border border-zinc-200 bg-white p-3 text-left shadow-xl">
+    {isOpen && <span className="absolute left-1/2 top-[calc(100%+10px)] z-30 block w-72 -translate-x-1/2 rounded-xl border border-zinc-200 bg-white p-3 text-left shadow-xl">
       <span className="block text-[11px] font-medium text-zinc-400">代码来源</span>
       <span className="mt-1.5 block cursor-default break-all text-xs font-medium text-blue-600 underline underline-offset-2">{source}</span>
       <span className="mt-2 block text-[11px] leading-relaxed text-zinc-400">历史逻辑仅展示来源，不支持查看</span>
-      <span aria-hidden="true" className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-zinc-200 bg-white" />
+      <span aria-hidden="true" className="absolute -top-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-l border-t border-zinc-200 bg-white" />
     </span>}
   </span>;
 };
@@ -120,8 +120,9 @@ const renderInlineMarkdown = (text: string, keyPrefix: string, onCitationClick?:
 const isTableSeparator = (line: string) => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
 const splitTableRow = (line: string) => line.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim());
 
-const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '', citationSourceTexts: Record<string, string> = {}, citationNumbers: Record<string, number> = {}) => {
+const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '', citationSourceTexts: Record<string, string> = {}, citationNumbers: Record<string, number> = {}, historySources: string[] = []) => {
   const rendered: ReactNode[] = [];
+  let nextHistorySource = 0;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     const key = `${keyPrefix}-${index}`;
@@ -145,7 +146,8 @@ const renderMarkdownLines = (lines: string[], keyPrefix: string, onCitationClick
   if (heading) {
     const level = heading[1].length;
     const className = level === 1 ? 'mt-2 text-2xl font-bold tracking-tight text-zinc-900' : level === 2 ? 'mt-9 text-xl font-semibold text-zinc-900' : 'mt-6 text-base font-semibold text-zinc-900';
-    rendered.push(<h2 key={key} className={className}>{renderInlineMarkdown(heading[2], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers)}</h2>);
+    const historySource = level === 2 ? historySources[nextHistorySource++] : undefined;
+    rendered.push(<h2 key={key} className={`${className} flex items-center gap-3`}>{renderInlineMarkdown(heading[2], key, onCitationClick, activeCitationId, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers)}{historySource && <HistoryLogicTag source={historySource} />}</h2>);
     continue;
   }
   const task = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
@@ -179,8 +181,10 @@ const RenderedDerivation = ({ content, hideLeadingTitle = false, sourceText, cit
   // they do not contradict the new inline-citation experience.
   const legacyEvidenceIndex = lines.findIndex(line => /^#{1,3}\s*原文依据\s*$/.test(line.trim()));
   const visibleLines = (legacyEvidenceIndex === -1 ? lines : lines.slice(0, legacyEvidenceIndex));
-  if (hideLeadingTitle && /^#\s+/.test(visibleLines[0]?.trim() || '')) visibleLines.splice(0, 1);
-  return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(visibleLines, 'line', onCitationClick, activeCitation?.id, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers)}</article>;
+  const historySources = [...content.matchAll(/\[\[history:([^\]]+)\]\]/g)].map(match => match[1].trim());
+  const contentWithoutHistoryMarkers = visibleLines.map(line => line.replace(/\s*\[\[history:[^\]]+\]\]/g, ''));
+  if (hideLeadingTitle && /^#\s+/.test(contentWithoutHistoryMarkers[0]?.trim() || '')) contentWithoutHistoryMarkers.splice(0, 1);
+  return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(contentWithoutHistoryMarkers, 'line', onCitationClick, activeCitation?.id, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers, historySources)}</article>;
 };
 
 const MindMapOverview = ({ overview, roleName }: { overview: VisualOverview; roleName: string }) => {

@@ -98,11 +98,12 @@ function validateCitations(content, sourceDocuments) {
   }
 }
 
-function validateHistoryMarkers(content) {
+function keepCompleteHistoryMarkers(content) {
   const markers = [...content.matchAll(/\[\[history:([^\]]+)\]\]/g)].map(match => match[1].trim());
-  if (markers.length !== 2 || markers.some(marker => !/^legacy\/[a-z0-9_./-]+\.(?:ts|tsx|js)$/i.test(marker))) {
-    throw new Error('AI 未能生成两个有效的历史逻辑提示，请重试');
-  }
+  const isComplete = markers.length === 2 && markers.every(marker => /^legacy\/[a-z0-9_./-]+\.(?:ts|tsx|js)$/i.test(marker));
+  // Historical logic is optional UI context. It must never prevent the
+  // grounded role document from being generated; show both markers or none.
+  return isComplete ? content : content.replace(/\[\[history:[^\]]*(?:\]\]|$)/g, '');
 }
 
 async function saveDerivation(record) {
@@ -199,9 +200,9 @@ export default async function handler(req, res) {
     // Preserve the original single-document pipeline exactly. All citation
     // rewriting and validation belongs exclusively to the related-document
     // path, where a source identifier is required for cross-document lookup.
-    const content = useBlockCitations ? resolveBlockCitations(responseContent, citationBlocks) : responseContent;
+    const citedContent = useBlockCitations ? resolveBlockCitations(responseContent, citationBlocks) : responseContent;
+    const content = isCitationRepair ? citedContent : keepCompleteHistoryMarkers(citedContent);
     if (useBlockCitations) validateCitations(content, citationSources);
-    if (!isCitationRepair) validateHistoryMarkers(content);
     if (isCitationRepair && !content.includes('[[cite:')) throw new Error('AI 未能修复出有效引用，请重试');
 
     const saved = await saveDerivation({

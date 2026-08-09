@@ -64,7 +64,8 @@ export function ChatWorkspace({ chat, activeUserId, setActiveApp, setActiveItemI
   }, [activeUserId, chat.id, onMarkChatRead]);
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="h-full bg-[#F7F8FA] p-5">
+      <div className="flex h-full flex-col overflow-hidden rounded-[28px] border border-zinc-100 bg-white shadow-sm">
       {/* Header */}
       <header className="h-[72px] shrink-0 border-b border-zinc-100 px-8 flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -175,6 +176,7 @@ export function ChatWorkspace({ chat, activeUserId, setActiveApp, setActiveItemI
             <Send size={18} className="ml-0.5" />
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

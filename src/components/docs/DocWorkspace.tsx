@@ -1,7 +1,7 @@
-import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, Loader2, PanelLeftOpen, Plus, Eye, MessageCircle, AtSign, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Share, MessageSquare, MoreHorizontal, Clock, Star, Play, Users, X, FileText, Check, User, Sparkles, PanelLeftOpen, Plus, Eye, MessageCircle, AtSign, ChevronLeft, ChevronRight, PenLine, PanelsTopLeft } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { DocItem, DocLibrary, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation } from '../../types';
+import { DocItem, DocLibrary, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation, ChallengeTask } from '../../types';
 import { formatPlainTextAsDocument } from './DocEmptyState';
 import { USERS } from '../../App';
 
@@ -172,6 +172,45 @@ const ProjectOverview = ({ title, roleName }: { title: string; roleName: string 
   </div>
 );
 
+const PIXEL_ROLE_COLORS: Record<string, string> = {
+  backend: '#18181B',
+  frontend: '#3B82F6',
+  ui: '#8B5CF6',
+  qa: '#22C55E',
+};
+
+const PixelSpeaker = ({ roleId, roleName, speaking, flipped = false }: { roleId: string; roleName: string; speaking: boolean; flipped?: boolean }) => {
+  const [talkFrame, setTalkFrame] = useState(false);
+  const clothingColor = PIXEL_ROLE_COLORS[roleId] || '#71717A';
+
+  useEffect(() => {
+    if (!speaking) {
+      setTalkFrame(false);
+      return;
+    }
+    setTalkFrame(false);
+    const intervalId = window.setInterval(() => setTalkFrame(frame => !frame), 300);
+    return () => window.clearInterval(intervalId);
+  }, [speaking]);
+
+  return <div className="flex w-12 shrink-0 flex-col items-center gap-1 text-center">
+    <span className="max-w-full truncate text-[10px] font-semibold text-zinc-800">{roleName.replace('工程师', '')}</span>
+    <svg width="42" height="41" viewBox="0 0 31 30" fill="none" role="img" aria-label={`${roleName}${speaking ? '正在发言' : ''}`} className={`overflow-visible [image-rendering:pixelated] ${flipped ? '-scale-x-100' : ''}`}>
+      <rect x="4.50293" width="14.6361" height="11.2586" fill="black" />
+      <rect x="18.5767" y="2.25171" width="5.06635" height="11.2586" fill="black" />
+      <rect x="1.68896" y="2.81464" width="2.81464" height="7.88099" fill="black" />
+      <rect y="10.6956" width="6.75513" height="7.31806" fill="black" />
+      <rect x="6.75488" y="9.00685" width="14.0732" height="10.1327" fill="#FFEBD8" />
+      <rect x="4.50293" y="11.2586" width="2.25171" height="4.50342" fill="#FFEBD8" />
+      <rect x="0.562988" y="19.1395" width="15.762" height="7.88099" fill={clothingColor} />
+      <rect x="16.3247" y="16.3249" width="14.0732" height="7.88099" fill="#C6C6C6" />
+      <rect x="16.2124" y="23.643" width="14.1858" height="5.40411" fill="#C6C6C6" />
+      <rect x="6.07959" y="27.0205" width="10.1327" height="2.02654" fill="#C6C6C6" />
+      {talkFrame ? <motion.g key="talking" initial={{ opacity: 0.5 }} animate={{ opacity: 1 }} transition={{ duration: 0.12 }}><rect x="10" y="21" width="5.06635" height="3.37757" fill="#FFEBD8" /><rect x="11" y="12" width="2" height="2" fill="black" /><rect x="16" y="12" width="2" height="2" fill="black" /></motion.g> : <motion.g key="resting" initial={{ opacity: 0.5 }} animate={{ opacity: 1 }} transition={{ duration: 0.12 }}><rect x="9.56982" y="23.643" width="5.06635" height="3.37757" fill="#FFEBD8" /><rect x="10.6953" y="11.8215" width="1.68878" height="3.37757" fill="black" /><rect x="16.3247" y="11.8215" width="1.68878" height="3.37757" fill="black" /></motion.g>}
+    </svg>
+  </div>;
+};
+
 interface DocWorkspaceProps {
   doc: DocItem;
   libraryName?: string;
@@ -194,20 +233,25 @@ interface DocWorkspaceProps {
   onAddComment: (comment: Omit<DocComment, 'id' | 'createdAt'>) => void;
   onResolveComment: (commentId: string) => void;
   activeUserId: string;
+  onAddChallengeTask: (task: Omit<ChallengeTask, 'createdAt' | 'unread' | 'status'>) => void;
   reviewMode?: boolean;
 }
 
-export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, storedDerivations, onStoreGeneratedDerivation, derivationSnapshots, onRecordDerivationSnapshot, canManageDerivations, comments, onAddComment, onResolveComment, activeUserId, reviewMode = false }: DocWorkspaceProps) {
+export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, onShareDoc, isDirCollapsed, setIsDirCollapsed, initialRoleId, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, storedDerivations, onStoreGeneratedDerivation, derivationSnapshots, onRecordDerivationSnapshot, canManageDerivations, comments, onAddComment, onResolveComment, activeUserId, onAddChallengeTask, reviewMode = false }: DocWorkspaceProps) {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [isChallengeModalOpen, setIsChallengeModalOpen] = useState(false);
   const [isChallengePanelOpen, setIsChallengePanelOpen] = useState(false);
   const [challengeRoleIds, setChallengeRoleIds] = useState<Set<string>>(new Set());
+  const [challengeSentencesPerRole, setChallengeSentencesPerRole] = useState<1 | 2>(2);
   const [challengeTurn, setChallengeTurn] = useState(0);
+  const [challengeRun, setChallengeRun] = useState(0);
+  const [isChallengeStopped, setIsChallengeStopped] = useState(false);
+  const [challengeTasks, setChallengeTasks] = useState<Array<{ key: string; roleName: string; content: string }>>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set<string>(initialRoleId ? [initialRoleId] : []));
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
   const [includeVisualOverview, setIncludeVisualOverview] = useState(false);
-  const [derivativePackageTab, setDerivativePackageTab] = useState<'overview' | 'document' | 'related'>('document');
+  const [derivativePackageTab, setDerivativePackageTab] = useState<'overview' | 'document'>('document');
   const [activeSourceDocumentId, setActiveSourceDocumentId] = useState(doc.id);
 
   // Sidebar state
@@ -216,13 +260,16 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [isCommentPanelOpen, setIsCommentPanelOpen] = useState(reviewMode || comments.length > 0);
   const [activeDerivativeRoles, setActiveDerivativeRoles] = useState<string[]>(Array.from(appliedRoleIds));
   const [activeDerivativeDocs, setActiveDerivativeDocs] = useState<string[]>([]);
+  const [displayedRelatedDocs, setDisplayedRelatedDocs] = useState<Record<string, string[]>>({});
   const [loadingRoles, setLoadingRoles] = useState<Record<string, boolean>>({});
+  const [cancelledRoles, setCancelledRoles] = useState<Set<string>>(new Set());
   const [generatedDerivations, setGeneratedDerivations] = useState<Record<string, GeneratedDerivation>>(storedDerivations);
   const [sourceContentHash, setSourceContentHash] = useState<string | null>(null);
   const [derivationUpdates, setDerivationUpdates] = useState<DerivationUpdate[]>([]);
   const [isPreparingUpdates, setIsPreparingUpdates] = useState(false);
   const [updatePreparationError, setUpdatePreparationError] = useState('');
   const [generationErrors, setGenerationErrors] = useState<Record<string, string>>({});
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [viewingDerivativeRole, setViewingDerivativeRole] = useState<string | null>(reviewMode && canManageDerivations ? null : initialRoleId || null);
   const [isRestoringOriginal, setIsRestoringOriginal] = useState(false);
   const [pendingDerivativeRole, setPendingDerivativeRole] = useState<string | null>(null);
@@ -250,6 +297,16 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const commentSelectionStartedRef = useRef(false);
   const derivativeViewTimerRef = useRef<number | null>(null);
+  const generationControllersRef = useRef<Record<string, AbortController>>({});
+  const toastTimerRef = useRef<number | null>(null);
+  const challengePanelScrollRef = useRef<HTMLDivElement>(null);
+  const activeChallengeItemRef = useRef<HTMLDivElement>(null);
+
+  const showToast = (message: string) => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    setToastMessage(message);
+    toastTimerRef.current = window.setTimeout(() => setToastMessage(null), 2800);
+  };
 
   const openCommentPanel = () => {
     setIsSidebarOpen(false);
@@ -272,7 +329,12 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
 
   useEffect(() => {
     setActiveSourceDocumentId(doc.id);
+    setDisplayedRelatedDocs({});
   }, [doc.id]);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+  }, []);
 
   // Existing comments are part of the document context, not only the review
   // route. Opening a document therefore exposes the matching discussion.
@@ -384,24 +446,86 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
 
   const challengeParticipants = roles.filter(role => challengeRoleIds.has(role.id));
   const challengePromptByRole: Record<string, string[]> = {
-    backend: [`《${doc.title}》的“关键交付物”里，接口边界由谁确认？字段口径已经定下来了吗？`, `《${doc.title}》涉及的依赖服务如果不可用，用户侧的降级体验和负责人分别是什么？`],
-    frontend: [`《${doc.title}》中提到的关键用户路径，从打开页面到完成操作，第一步和下一步是否写清楚了？`, `《${doc.title}》中的操作反馈、失败状态和返回路径，是否能让用户知道当前发生了什么？`],
-    qa: [`《${doc.title}》的验收标准能否直接转成测试用例？每项的通过条件是否明确？`, `《${doc.title}》是否已列出异常路径、权限差异和 WCAG AA 无障碍验收范围？`],
-    ui: [`《${doc.title}》的执行摘要、关键交付物和行动项，阅读优先级是否足够明确？`, `《${doc.title}》里“嵌入的原型”和关键交付物之间的关系，是否需要增加更直观的结构说明？`],
+    backend: [`“关键交付物”里，接口边界由谁确认？字段口径已经定下来了吗？`, `涉及的依赖服务如果不可用，用户侧的降级体验和负责人分别是什么？`, `数据结构变更的兼容策略和回滚方案，是否已经明确？`, `关键接口的权限校验、限流和审计日志是否覆盖完整？`, `异步任务失败后的重试、幂等和人工介入边界是否清楚？`, `关键数据的权限隔离和敏感信息处理是否有明确规则？`],
+    frontend: [`关键用户路径从打开页面到完成操作，第一步和下一步是否写清楚了？`, `操作反馈、失败状态和返回路径，是否能让用户知道当前发生了什么？`, `窄屏与不同浏览器下的布局、加载状态是否有明确验收标准？`, `交互中断后如何恢复用户上下文，文档里是否已有说明？`, `关键操作的防重复提交和离开页面提醒是否需要补充？`, `页面性能指标和首屏加载的可接受范围是否已经约定？`],
+    qa: [`验收标准能否直接转成测试用例？每项的通过条件是否明确？`, `是否已列出异常路径、权限差异和 WCAG AA 无障碍验收范围？`, `核心链路的边界值、并发和数据迁移场景是否覆盖？`, `上线后的监控阈值、告警责任人与复盘节奏是否明确？`, `回归范围、测试数据准备和发布前检查项是否有负责人？`, `异常恢复后，关键数据一致性的验证方式是否已经定义？`],
+    ui: [`执行摘要、关键交付物和行动项，阅读优先级是否足够明确？`, `“嵌入的原型”和关键交付物之间的关系，是否需要增加更直观的结构说明？`, `信息层级、空状态和错误状态是否与主路径保持一致？`, `关键动作的反馈与无障碍描述是否足以支撑验收？`, `复杂信息是否需要进一步拆分，帮助读者快速理解重点？`, `不同状态下的文案语气和视觉反馈是否保持一致？`],
   };
-  // Two complete turns around the table: everyone speaks once per turn.
-  const challengeMessages = [0, 1].flatMap(round => challengeParticipants.map(role => ({
-    role,
-    content: (challengePromptByRole[role.id] || [`《${doc.title}》尚未明确的关键假设有哪些？`, `《${doc.title}》的执行边界和风险处理，是否需要在开始前补充？`])[round],
-  })));
-  const activeChallengeMessage = challengeMessages[Math.min(challengeTurn, Math.max(challengeMessages.length - 1, 0))];
+  const hasNoMoreChallenges = challengeRun >= 2;
+  // Every selected role speaks once per configured round.
+  const challengeMessages = hasNoMoreChallenges
+    ? challengeParticipants.slice(0, 2).map((role, index) => ({ role, content: index === 0 ? '唔，感觉似乎没什么可以质疑的了呢。' : '我感觉已经是一份很棒的文档了！' }))
+    : Array.from({ length: challengeSentencesPerRole }, (_, round) => round).flatMap(round => challengeParticipants.map(role => ({
+      role,
+      content: (challengePromptByRole[role.id] || ['尚未明确的关键假设有哪些？', '执行边界和风险处理，是否需要在开始前补充？', '当前方案的验收依据是否足够清晰？'])[challengeRun * challengeSentencesPerRole + round],
+    })));
+  const activeChallengeMessage = challengeMessages[challengeTurn];
+  const [typedChallengeLength, setTypedChallengeLength] = useState(0);
+  const isChallengeSentenceComplete = Boolean(activeChallengeMessage && typedChallengeLength >= activeChallengeMessage.content.length);
+
+  useEffect(() => {
+    if (!isChallengePanelOpen || isChallengeStopped || !activeChallengeMessage) {
+      setTypedChallengeLength(0);
+      return;
+    }
+    setTypedChallengeLength(0);
+    const intervalId = window.setInterval(() => {
+      setTypedChallengeLength(length => Math.min(length + 1, activeChallengeMessage.content.length));
+    }, 28);
+    return () => window.clearInterval(intervalId);
+  }, [isChallengePanelOpen, isChallengeStopped, challengeTurn, activeChallengeMessage?.content]);
+
+  useEffect(() => {
+    if (!isChallengePanelOpen || isChallengeStopped || !activeChallengeMessage || !isChallengeSentenceComplete) return;
+    const timeoutId = window.setTimeout(() => setChallengeTurn(turn => Math.min(turn + 1, challengeMessages.length)), 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [isChallengePanelOpen, isChallengeStopped, activeChallengeMessage?.content, isChallengeSentenceComplete, challengeMessages.length]);
+
+  useEffect(() => {
+    if (!isChallengePanelOpen || isChallengeStopped || !activeChallengeMessage) return;
+    const frameId = window.requestAnimationFrame(() => {
+      const container = challengePanelScrollRef.current;
+      const activeItem = activeChallengeItemRef.current;
+      if (!container || !activeItem) return;
+      const containerRect = container.getBoundingClientRect();
+      const itemRect = activeItem.getBoundingClientRect();
+      const safeTop = containerRect.top + 24;
+      const safeBottom = containerRect.bottom - 32;
+      if (itemRect.top < safeTop || itemRect.bottom > safeBottom) {
+        const offset = itemRect.top < safeTop ? itemRect.top - safeTop : itemRect.bottom - safeBottom;
+        container.scrollTo({ top: Math.max(0, container.scrollTop + offset), behavior: 'smooth' });
+      }
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isChallengePanelOpen, isChallengeStopped, challengeTurn, activeChallengeMessage?.content]);
+
   const startChallenge = () => {
     if (!challengeRoleIds.size) return;
+    setChallengeRun(0);
     setChallengeTurn(0);
+    setChallengeTasks([]);
+    setIsChallengeStopped(false);
     setIsChallengeModalOpen(false);
     setIsCommentPanelOpen(false);
     setIsSidebarOpen(false);
     setIsChallengePanelOpen(true);
+  };
+  const restartChallenge = () => {
+    setChallengeRun(run => run + 1);
+    setChallengeTurn(0);
+    setIsChallengeStopped(false);
+  };
+  const closeChallengePanel = () => {
+    setIsChallengeStopped(true);
+    setIsChallengePanelOpen(false);
+  };
+  const challengeTaskKey = (index: number) => `${challengeRun}-${index}`;
+  const addChallengeTask = (index: number) => {
+    const message = challengeMessages[index];
+    if (!message) return;
+    const key = challengeTaskKey(index);
+    setChallengeTasks(previous => previous.some(task => task.key === key) ? previous : [...previous, { key, roleName: message.role.name, content: message.content }]);
+    onAddChallengeTask({ id: `challenge_${doc.id}_${key}`, docId: doc.id, docTitle: doc.title, roleName: message.role.name, content: message.content });
   };
   const toggleChallengeRole = (roleId: string) => setChallengeRoleIds(previous => {
     const next = new Set(previous);
@@ -446,10 +570,26 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
 
   const allDocs = libraries.flatMap(lib => lib.docs);
   const viewingDerivation = viewingDerivativeRole ? generatedDerivations[viewingDerivativeRole] : undefined;
-  const sourceDocuments = [doc, ...(viewingDerivation?.relatedDocumentIds || [])
+  const sidebarRelatedDocumentIds = Array.from(new Set([
+    ...activeDerivativeDocs,
+    ...(Object.values(generatedDerivations) as GeneratedDerivation[]).flatMap(derivation => derivation.relatedDocumentIds),
+    ...Object.values(displayedRelatedDocs).flat(),
+  ]));
+  const sourceDocuments = [doc, ...sidebarRelatedDocumentIds
+    .filter(id => id !== doc.id)
     .map(id => allDocs.find(item => item.id === id))
     .filter((item): item is DocItem => Boolean(item))];
   const activeSourceDocument = sourceDocuments.find(item => item.id === activeSourceDocumentId) || doc;
+
+  const switchRelatedDocument = (roleId: string, nextSourceId: string, roleRelatedDocIds: string[]) => {
+    if (nextSourceId === activeSourceDocumentId) return;
+    const previousSourceId = activeSourceDocumentId;
+    setActiveSourceDocumentId(nextSourceId);
+    setDisplayedRelatedDocs(previous => ({
+      ...previous,
+      [roleId]: [previousSourceId, ...roleRelatedDocIds.filter(id => id !== nextSourceId && id !== previousSourceId)],
+    }));
+  };
   // A document has one role in a source document: it is either the current
   // document, a collaborative related document, or a read-only citation.
   const unavailableCitationIds = new Set([doc.id, ...Array.from(selectedDocIds), ...activeDerivativeDocs]);
@@ -528,8 +668,15 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     const role = roles.find(item => item.id === roleId);
     if (!role) return;
     const previousDerivation = generatedDerivations[roleId];
+    const controller = new AbortController();
+    generationControllersRef.current[roleId] = controller;
     setLoadingRoles(prev => ({ ...prev, [roleId]: true }));
     setGenerationErrors(prev => ({ ...prev, [roleId]: '' }));
+    setCancelledRoles(previous => {
+      const next = new Set(previous);
+      next.delete(roleId);
+      return next;
+    });
     try {
       const relatedDocuments = allDocs.filter(item => relatedDocIds.includes(item.id)).map(item => ({
         id: item.id,
@@ -544,6 +691,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           role: { id: role.id, name: role.name },
           relatedDocuments,
         }),
+        signal: controller.signal,
       });
       const responseText = await response.text();
       let data: { derivation?: { content: string; related_document_ids?: string[]; source_content_hash?: string | null; updated_at: string }; error?: string };
@@ -588,9 +736,46 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         });
       }
     } catch (error) {
+      if (controller.signal.aborted) return;
       setGenerationErrors(prev => ({ ...prev, [roleId]: error instanceof Error ? error.message : '生成失败，请稍后重试' }));
     } finally {
+      if (generationControllersRef.current[roleId] === controller) delete generationControllersRef.current[roleId];
       setLoadingRoles(prev => ({ ...prev, [roleId]: false }));
+    }
+  };
+
+  const stopGeneration = (roleId: string) => {
+    generationControllersRef.current[roleId]?.abort();
+    setCancelledRoles(previous => new Set(previous).add(roleId));
+    setLoadingRoles(previous => ({ ...previous, [roleId]: false }));
+  };
+
+  const closeDerivativeRole = (roleId: string) => {
+    if (appliedRoleIds.has(roleId)) {
+      showToast('如需关闭该角色的衍生文档请先取消应用');
+      return;
+    }
+    generationControllersRef.current[roleId]?.abort();
+    setActiveDerivativeRoles(previous => previous.filter(id => id !== roleId));
+    setSelectedRoleIds(previous => {
+      const next = new Set(previous);
+      next.delete(roleId);
+      return next;
+    });
+    setCancelledRoles(previous => {
+      const next = new Set(previous);
+      next.delete(roleId);
+      return next;
+    });
+    setDisplayedRelatedDocs(previous => {
+      const next = { ...previous };
+      delete next[roleId];
+      return next;
+    });
+    if (viewingDerivativeRole === roleId) {
+      setViewingDerivativeRole(null);
+      setShowOriginal(true);
+      setActiveSourceDocumentId(doc.id);
     }
   };
 
@@ -604,6 +789,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     // The right column is a single contextual container. Generation makes
     // derivation the active context, so it must replace comments explicitly.
     setIsCommentPanelOpen(false);
+    setIsChallengePanelOpen(false);
     setIsSidebarOpen(true);
     setViewingDerivativeRole(null);
     // Let the role modal finish closing before the library begins to collapse.
@@ -892,7 +1078,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     window.setTimeout(() => {
       onResolveComment(commentId);
       setResolvingCommentId(null);
-    }, 180);
+    }, 1000);
   };
 
   const originalHighlights = comments.filter(comment => comment.status !== 'resolved').map(comment => comment.sourceText?.trim()).filter((text): text is string => Boolean(text));
@@ -955,6 +1141,9 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   
   return (
     <div className="flex flex-col h-full bg-white">
+      <AnimatePresence>
+        {toastMessage && <motion.div role="status" aria-live="polite" initial={{ opacity: 0, y: -8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.98 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="fixed left-1/2 top-5 z-[100] -translate-x-1/2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-medium text-white shadow-xl">{toastMessage}</motion.div>}
+      </AnimatePresence>
       {/* Header */}
       <header className="h-[72px] shrink-0 border-b border-zinc-100 px-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -969,7 +1158,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           )}
           <div className="flex items-center gap-1.5 text-sm text-zinc-500 font-medium">
             <span>文档</span><span className="text-zinc-300">/</span><span>{libraryName || '文档库'}</span><span className="text-zinc-300">/</span>
-            {isEditingTitle ? <input autoFocus value={titleDraft} onChange={event => setTitleDraft(event.target.value)} onBlur={saveTitle} onKeyDown={event => { if (event.key === 'Enter') saveTitle(); if (event.key === 'Escape') { setTitleDraft(doc.isUntitled ? '' : doc.title); setIsEditingTitle(false); } }} className="w-40 rounded border border-indigo-300 bg-white px-1.5 py-0.5 text-sm text-zinc-900 outline-none" /> : <button onClick={() => setIsEditingTitle(true)} className={`text-left ${doc.isUntitled ? 'text-zinc-400' : 'text-zinc-900'} hover:text-indigo-600`}>{doc.title}</button>}
+            {isEditingTitle ? <input autoFocus value={titleDraft} onChange={event => setTitleDraft(event.target.value)} onBlur={saveTitle} onKeyDown={event => { if (event.key === 'Enter') saveTitle(); if (event.key === 'Escape') { setTitleDraft(doc.isUntitled ? '' : doc.title); setIsEditingTitle(false); } }} className="w-40 rounded border border-indigo-300 bg-white px-1.5 py-0.5 text-sm text-zinc-900 outline-none" /> : activeSourceDocument.id === doc.id ? <button onClick={() => setIsEditingTitle(true)} className={`text-left ${doc.isUntitled ? 'text-zinc-400' : 'text-zinc-900'} hover:text-indigo-600`}>{doc.title}</button> : <span className="text-zinc-900">{activeSourceDocument.title}</span>}
             {viewingDerivativeRole && <><span className="text-zinc-300">/</span><span className="text-zinc-900">{roles.find(role => role.id === viewingDerivativeRole)?.name} · 衍生文档</span></>}
           </div>
         </div>
@@ -997,39 +1186,46 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
             <Star size={18} />
           </button>
           <div className="flex items-center">
-            <div className="flex -space-x-2 mr-4">
+            <div className="mr-10 flex -space-x-2">
               <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" className="w-8 h-8 rounded-full border-2 border-white" alt="" />
               <img src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" className="w-8 h-8 rounded-full border-2 border-white" alt="" />
             </div>
-            {canManageDerivations && <div className="relative mr-2">
-              <button 
-                onClick={() => activeDerivativeRoles.length === 0 ? setIsRoleModalOpen(true) : setIsDerivativeMenuOpen(open => !open)}
-                className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-              >
-                <Users size={16} />
-                角色衍生
-              </button>
-              <AnimatePresence>
-                {isDerivativeMenuOpen && <motion.div initial={{ opacity: 0, y: -6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.98 }} className="absolute right-0 top-[calc(100%+8px)] z-40 w-48 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-lg">
-                  <button onClick={() => { openRolePanel(); setIsDerivativeMenuOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-50"><Eye size={15} className="text-indigo-600" />查看已有衍生</button>
-                  <button onClick={() => { setIsRoleModalOpen(true); setIsDerivativeMenuOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-50"><Plus size={15} className="text-indigo-600" />创建新衍生</button>
-                </motion.div>}
-              </AnimatePresence>
-            </div>}
-            {canManageDerivations && <button onClick={() => setIsChallengeModalOpen(true)} className="mr-2 flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-200">
-              <MessageSquare size={16} /> 模拟质疑
-            </button>}
             {!canManageDerivations && initialRoleId && <button onClick={() => showOriginal ? closeOriginal() : setShowOriginal(true)} className="flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors mr-2">
               <Eye size={16} />
               {showOriginal ? '关闭原文' : '查看原文'}
             </button>}
             <button 
               onClick={() => setIsShareModalOpen(true)}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+              className="flex items-center gap-2 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-zinc-800"
             >
               <Share size={16} />
               分享
             </button>
+            {canManageDerivations && <>
+              <button onClick={() => setIsChallengeModalOpen(true)} className="ml-3 flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-200">
+                <MessageSquare size={16} /> 模拟质疑
+              </button>
+              <span aria-hidden="true" className="mx-5 h-6 w-px bg-zinc-200" />
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setIsChallengePanelOpen(false);
+                    setIsCommentPanelOpen(false);
+                    activeDerivativeRoles.length === 0 ? setIsRoleModalOpen(true) : setIsDerivativeMenuOpen(open => !open);
+                  }}
+                  className="flex items-center gap-2 rounded-lg bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
+                >
+                  <Users size={16} />
+                  角色衍生
+                </button>
+                <AnimatePresence>
+                  {isDerivativeMenuOpen && <motion.div initial={{ opacity: 0, y: -6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.98 }} className="absolute right-0 top-[calc(100%+8px)] z-40 w-48 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-lg">
+                    <button onClick={() => { openRolePanel(); setIsDerivativeMenuOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-50"><Eye size={15} className="text-indigo-600" />查看已有衍生</button>
+                    <button onClick={() => { setIsRoleModalOpen(true); setIsDerivativeMenuOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-50"><Plus size={15} className="text-indigo-600" />创建新衍生</button>
+                  </motion.div>}
+                </AnimatePresence>
+              </div>
+            </>}
           </div>
           <button className="w-9 h-9 flex items-center justify-center text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50 rounded-full transition-colors">
             <MoreHorizontal size={18} />
@@ -1063,10 +1259,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           </AnimatePresence>
           {!canManageDerivations && <button onClick={closeOriginal} aria-label="关闭原文" className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-700"><X size={17} /></button>}
           <div ref={originalDocumentRef} onKeyUp={updateMentionMenu} onKeyDown={handleEditorKeyDown} className="max-w-4xl mx-auto px-12 py-16">
-            {viewingDerivativeRole && sourceDocuments.length > 1 && <div className="mb-7 rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3">
+            {viewingDerivativeRole && sourceDocuments.length > 1 && <div className="-mt-8 mb-7 w-full rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3">
               <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-indigo-700"><FileText size={14} /> 来源文档</div>
               <div className="flex flex-wrap gap-2" role="tablist" aria-label="切换来源文档">
-                {sourceDocuments.map((source, index) => <button key={source.id} type="button" role="tab" aria-selected={activeSourceDocument.id === source.id} onClick={() => setActiveSourceDocumentId(source.id)} className={`inline-flex max-w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors ${activeSourceDocument.id === source.id ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100' : 'text-zinc-600 hover:bg-white/70'}`}><span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded ${activeSourceDocument.id === source.id ? 'bg-indigo-100 text-indigo-600' : 'bg-zinc-200 text-zinc-500'}`}>{index + 1}</span><span className="max-w-44 truncate">{index === 0 ? `主文档 · ${source.title}` : `关联文档 · ${source.title}`}</span></button>)}
+                {sourceDocuments.map(source => <button key={source.id} type="button" role="tab" aria-selected={activeSourceDocument.id === source.id} onClick={() => setActiveSourceDocumentId(source.id)} className={`inline-flex max-w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors ${activeSourceDocument.id === source.id ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100' : 'text-zinc-600 hover:bg-white/70'}`}><FileText size={14} className={activeSourceDocument.id === source.id ? 'shrink-0 text-indigo-500' : 'shrink-0 text-zinc-400'} /><span className="max-w-52 truncate">{source.title}</span></button>)}
               </div>
             </div>}
             {canManageDerivations && (unpreparedUpdateRoleIds.length > 0 || pendingUpdateRoleIds.size > 0) && (
@@ -1082,13 +1278,15 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 </>}
               </div>
             )}
-            {activeSourceDocument.id !== doc.id ? <div className="rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm">
-              <div className="flex items-start justify-between gap-4 border-b border-zinc-100 pb-5">
-                <div><span className="inline-flex items-center gap-1.5 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"><FileText size={12} /> 关联文档</span><h1 className="mt-4 text-2xl font-bold tracking-tight text-zinc-900">{activeSourceDocument.title}</h1></div>
-                <span className="shrink-0 text-xs text-zinc-400">只读参考</span>
+            {activeSourceDocument.id !== doc.id ? <>
+              <div className="mb-6 flex items-center gap-3">
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600">
+                  {activeSourceDocument.type === 'document' ? '文档' : activeSourceDocument.type === 'spreadsheet' ? '表格' : activeSourceDocument.type === 'presentation' ? '演示文稿' : '文件夹'}
+                </span>
               </div>
-              <div className="prose prose-zinc mt-6 max-w-none text-sm leading-7 text-zinc-700">{activeSourceDocument.content ? <div className="imported-doc" dangerouslySetInnerHTML={{ __html: activeSourceDocument.content }} /> : <p>这份关联文档将与主文档一同作为角色衍生的参考来源。点击右侧的角色文档可继续阅读生成结果。</p>}</div>
-            </div> : <>
+              <h1 className="mb-8 text-3xl font-bold tracking-tight text-zinc-900">{activeSourceDocument.title}</h1>
+              {activeSourceDocument.content ? <div className="imported-doc" dangerouslySetInnerHTML={{ __html: activeSourceDocument.content }} /> : <p className="text-sm leading-relaxed text-zinc-700">文档内容待补充。</p>}
+            </> : <>
             <div className="mb-6 flex items-center gap-3">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-100 text-xs font-medium text-zinc-600">
                 {doc.type === 'document' ? '文档' : doc.type === 'spreadsheet' ? '表格' : doc.type === 'presentation' ? '演示文稿' : '文件夹'}
@@ -1122,13 +1320,13 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 {!reviewMode && comments.filter(comment => comment.citationId === '1').map(comment => <div key={comment.id} className="mt-3 ml-1 max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900"><span className="font-semibold">{USERS.find(user => user.id === comment.authorId)?.name || '成员'} · </span>{comment.content}</div>)}
 
                 <div className="my-8 p-6 bg-zinc-50 rounded-2xl border border-zinc-100 flex gap-4 items-start">
-                  <div className="bg-white p-3 rounded-xl shadow-sm border border-zinc-100 text-blue-600 shrink-0">
+                  <div className="bg-white p-3 rounded-xl shadow-sm border border-zinc-100 text-zinc-500 shrink-0">
                     <Play size={24} className="ml-0.5" />
                   </div>
                   <div>
                     <h4 className="font-semibold text-zinc-900 mb-1">嵌入的原型</h4>
                     <p className="text-sm text-zinc-500 mb-3">新认证模块的交互流程图。</p>
-                    <button className="text-sm font-medium text-blue-600 hover:text-blue-700">在新标签页中打开 &rarr;</button>
+                    <button className="text-sm font-medium text-zinc-500 hover:text-zinc-700">在新标签页中打开 &rarr;</button>
                   </div>
                 </div>
 
@@ -1216,11 +1414,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               {generatedDerivations[viewingDerivativeRole] ? (
                 <>
                   {generatedDerivations[viewingDerivativeRole].visualOverview && <div className="mb-6 flex w-fit rounded-xl bg-zinc-100 p-1" role="tablist" aria-label="衍生文档内容">
-                    <button role="tab" aria-selected={derivativePackageTab === 'overview'} onClick={() => setDerivativePackageTab('overview')} className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'overview' ? 'bg-white text-indigo-700 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}>项目速览</button>
-                    <button role="tab" aria-selected={derivativePackageTab === 'document'} onClick={() => setDerivativePackageTab('document')} className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'document' ? 'bg-white text-indigo-700 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}>角色文档</button>
-                    <button role="tab" aria-selected={derivativePackageTab === 'related'} onClick={() => setDerivativePackageTab('related')} className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'related' ? 'bg-white text-indigo-700 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}>关联文档</button>
+                    <button role="tab" aria-selected={derivativePackageTab === 'overview'} onClick={() => setDerivativePackageTab('overview')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'overview' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'overview' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">项目速览</span></button>
+                    <button role="tab" aria-selected={derivativePackageTab === 'document'} onClick={() => setDerivativePackageTab('document')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'document' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'document' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">角色文档</span></button>
                   </div>}
-                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverview ? <ProjectOverview title={doc.title} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : derivativePackageTab === 'related' && generatedDerivations[viewingDerivativeRole].visualOverview ? <div className="rounded-2xl border border-zinc-200 bg-white p-6"><h2 className="text-base font-semibold text-zinc-900">关联文档</h2><p className="mt-1 text-sm text-zinc-500">生成这份角色包时一并参考的资料。</p><div className="mt-5 space-y-2">{generatedDerivations[viewingDerivativeRole].relatedDocumentIds.length ? generatedDerivations[viewingDerivativeRole].relatedDocumentIds.map(id => <button key={id} type="button" onClick={() => { setActiveSourceDocumentId(id); setDerivativePackageTab('document'); }} className="flex w-full items-center gap-3 rounded-xl bg-zinc-50 px-4 py-3 text-left text-sm text-zinc-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700"><FileText size={16} className="text-indigo-500" />{allDocs.find(item => item.id === id)?.title || '关联文档'}</button>) : <p className="rounded-xl bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-400">此角色包暂未关联其他文档</p>}</div></div> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
+                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverview ? <ProjectOverview title={doc.title} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
                 </>
               ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed">
@@ -1304,39 +1501,58 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         <AnimatePresence initial={false}>
         {(isSidebarOpen || isCommentPanelOpen || isChallengePanelOpen) && (
           <motion.aside
-            initial={{ width: 0, x: 320, opacity: 0 }}
-            animate={{ width: 320, x: 0, opacity: 1 }}
-            exit={{ width: 0, x: 320, opacity: 0 }}
+            initial={{ width: 0, x: isChallengePanelOpen ? 408 : 352, opacity: 0 }}
+            animate={{ width: isChallengePanelOpen ? 408 : 352, x: 0, opacity: 1 }}
+            exit={{ width: 0, x: isChallengePanelOpen ? 408 : 352, opacity: 0 }}
             transition={{ duration: 0.22, ease: 'easeOut' }}
             className="order-3 ml-auto shrink-0 overflow-hidden border-l border-zinc-200 bg-white flex flex-col z-10 shadow-[-4px_0_12px_rgba(0,0,0,0.02)]"
           >
             <div className="h-[72px] border-b border-zinc-100 flex items-center px-5 justify-between shrink-0">
               <span className="font-semibold text-sm text-zinc-900">{isChallengePanelOpen ? '模拟质疑' : isCommentPanelOpen ? '文档评论' : '角色衍生'}</span>
               <button 
-                onClick={() => isChallengePanelOpen ? setIsChallengePanelOpen(false) : isCommentPanelOpen ? setIsCommentPanelOpen(false) : setIsSidebarOpen(false)}
+                onClick={() => isChallengePanelOpen ? closeChallengePanel() : isCommentPanelOpen ? setIsCommentPanelOpen(false) : setIsSidebarOpen(false)}
                 className="text-zinc-400 hover:text-zinc-600 p-1.5 rounded-md hover:bg-zinc-100 transition-colors"
               >
                 <X size={16} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto">
-              {isChallengePanelOpen ? <div className="p-4">
+            <div ref={challengePanelScrollRef} className="flex-1 overflow-x-hidden overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {isChallengePanelOpen ? <div className="p-5">
                 <p className="text-xs leading-relaxed text-zinc-500">让不同角色从自己的专业视角依次质疑这份原文，帮助你发现遗漏。</p>
-                <div className="relative mx-auto mt-6 h-44 max-w-[260px] rounded-[44%] border border-indigo-100 bg-gradient-to-b from-indigo-50 to-white">
-                  <div className="absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-white bg-indigo-600 text-center text-[11px] font-semibold text-white shadow-md">原文</div>
-                  {challengeParticipants.map((role, index) => { const angle = (Math.PI * 2 * index) / Math.max(challengeParticipants.length, 1) - Math.PI / 2; const x = 50 + Math.cos(angle) * 39; const y = 50 + Math.sin(angle) * 33; const active = activeChallengeMessage?.role.id === role.id; return <div key={role.id} title={role.name} style={{ left: `${x}%`, top: `${y}%` }} className={`absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 text-xs font-semibold transition-all ${active ? 'scale-110 border-indigo-200 bg-indigo-600 text-white shadow-md' : 'border-white bg-zinc-200 text-zinc-600'}`}><AnimatePresence>{active && <motion.div initial={{ opacity: 0, scale: 0.92, y: 4 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.92, y: 4 }} transition={{ duration: 0.18 }} className="absolute bottom-full left-1/2 z-20 mb-3 w-44 -translate-x-1/2 rounded-xl border border-indigo-100 bg-white px-3 py-2.5 text-left text-xs font-medium leading-5 text-zinc-700 shadow-lg"><span className="absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-indigo-100 bg-white" />{activeChallengeMessage.content}</motion.div>}</AnimatePresence>{role.name.slice(0, 1)}</div>; })}
+                <div className="mt-6 space-y-[30px]">
+                  <AnimatePresence initial={false}>
+                    {(challengeTurn >= challengeMessages.length ? challengeMessages : challengeMessages.slice(0, Math.min(challengeTurn + 1, challengeMessages.length))).map((message, visibleIndex) => {
+                      const messageIndex = visibleIndex;
+                      const isSpeaking = messageIndex === challengeTurn && challengeTurn < challengeMessages.length;
+                      const isRightAligned = messageIndex % 2 === 1;
+                      const taskKey = challengeTaskKey(messageIndex);
+                      const canAddTask = challengeTurn >= challengeMessages.length || (isSpeaking && isChallengeSentenceComplete);
+                      const taskAdded = challengeTasks.some(task => task.key === taskKey);
+                      const isChallengeComplete = challengeTurn >= challengeMessages.length;
+                      return <motion.div ref={node => { if (isSpeaking) activeChallengeItemRef.current = node; }} key={`${message.role.id}-${messageIndex}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }} className={`group/message flex items-end gap-4 ${isRightAligned ? 'flex-row-reverse' : ''}`}>
+                        <PixelSpeaker roleId={message.role.id} roleName={message.role.name} speaking={isSpeaking} flipped={isRightAligned} />
+                        <div className={`relative max-w-[232px] rounded-2xl px-3.5 py-3 text-xs font-medium leading-5 transition-colors ${isSpeaking ? 'bg-zinc-200 text-zinc-900' : 'bg-zinc-100 text-zinc-600'} ${isRightAligned ? 'rounded-br-md' : 'rounded-bl-md'}`}>
+                          <span aria-hidden="true" className={`absolute bottom-0 h-4 w-3 bg-inherit ${isRightAligned ? '-right-3 -scale-x-100 [clip-path:polygon(100%_0,100%_100%,0_100%)]' : '-left-3 [clip-path:polygon(100%_0,100%_100%,0_100%)]'}`} />
+                          <span className="relative">{isSpeaking ? message.content.slice(0, typedChallengeLength) : message.content}</span>
+                          {canAddTask && <button type="button" onClick={() => addChallengeTask(messageIndex)} disabled={taskAdded} aria-label={taskAdded ? '已添加到任务' : '添加到任务'} className={`group/task absolute -bottom-3 ${isRightAligned ? '-left-3' : '-right-3'} flex h-7 w-7 items-center justify-center rounded-full border text-xs transition-colors ${isChallengeComplete ? 'pointer-events-none opacity-0 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100' : ''} ${taskAdded ? 'border-zinc-300 bg-zinc-200 text-zinc-500' : 'border-zinc-200 bg-white text-zinc-700 shadow-sm hover:border-zinc-900 hover:bg-zinc-900 hover:text-white'}`}><Plus size={14} />{!taskAdded && <span role="tooltip" className="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition-none group-hover/task:opacity-100 group-focus-visible/task:opacity-100">添加到任务</span>}</button>}
+                        </div>
+                      </motion.div>;
+                    })}
+                  </AnimatePresence>
+                  {!challengeMessages.length && <p className="rounded-xl bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-400">请选择至少一个角色开始模拟质疑。</p>}
                 </div>
-                <div className="mt-7 flex items-center justify-center gap-4"><button type="button" aria-label="上一条质疑" disabled={challengeTurn === 0} onClick={() => setChallengeTurn(turn => Math.max(0, turn - 1))} className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35"><ChevronLeft size={18} /></button><span className="min-w-20 text-center text-xs font-medium text-zinc-400">{challengeMessages.length ? `${challengeTurn + 1}/${challengeMessages.length}` : '0/0'}</span><button type="button" aria-label="下一条质疑" disabled={!challengeMessages.length || challengeTurn >= challengeMessages.length - 1} onClick={() => setChallengeTurn(turn => Math.min(challengeMessages.length - 1, turn + 1))} className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35"><ChevronRight size={18} /></button></div>
+                {challengeTurn >= challengeMessages.length && challengeMessages.length > 0 && <button type="button" onClick={restartChallenge} className="mt-7 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-900">重新质疑</button>}
+                {challengeTasks.length > 0 && <div className="mt-5 border-t border-zinc-100 pt-4"><p className="text-xs font-semibold text-zinc-900">任务列表</p><div className="mt-2 space-y-2">{challengeTasks.map(task => <div key={task.key} className="rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-xs leading-relaxed text-zinc-700 shadow-sm"><span className="mr-1 font-semibold text-zinc-900">{task.roleName}：</span>{task.content}</div>)}</div></div>}
               </div> : isCommentPanelOpen ? <div className="p-4 space-y-3">
                 {comments.filter(comment => comment.status !== 'resolved').map(comment => {
                   const author = USERS.find(user => user.id === comment.authorId);
                   const replies = comment.replies || [];
                   return <div key={comment.id} className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-3.5">
-                    <div className="flex items-center gap-2 text-xs"><img src={author?.avatar} alt="" className="h-6 w-6 rounded-full object-cover" /><span className="font-semibold text-zinc-900">{author?.name || '成员'}</span><span className="text-zinc-400">{comment.createdAt}</span><button type="button" onClick={() => resolveSidebarComment(comment.id)} aria-label="标记为已解决" title="标记为已解决" className={`ml-auto flex h-7 w-7 items-center justify-center rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-100 ${resolvingCommentId === comment.id ? 'border-emerald-300 bg-emerald-50 text-emerald-600' : 'border-zinc-200 bg-white text-zinc-400 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600'}`}><Check size={15} strokeWidth={2.5} /></button></div>
+                    <div className="flex items-center gap-2 text-xs"><img src={author?.avatar} alt="" className="h-6 w-6 rounded-full object-cover" /><span className="font-semibold text-zinc-900">{author?.name || '成员'}</span><span className="text-zinc-400">{comment.createdAt}</span><button type="button" onClick={() => resolveSidebarComment(comment.id)} aria-label="标记为完成" className={`group/resolve relative ml-auto flex h-7 w-7 items-center justify-center rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-100 ${resolvingCommentId === comment.id ? 'border-emerald-300 bg-emerald-50 text-emerald-600' : 'border-zinc-200 bg-white text-zinc-400 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600'}`}><Check size={15} strokeWidth={2.5} /><span role="tooltip" className="pointer-events-none absolute right-0 top-[calc(100%+7px)] z-20 whitespace-nowrap rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition-none group-hover/resolve:opacity-100 group-focus-visible/resolve:opacity-100">标记为完成</span></button></div>
                     <p className="mt-3 text-sm leading-relaxed text-zinc-700">{comment.content}</p>
-                    {comment.sourceText && <p className="mt-2 border-l-2 border-amber-300 pl-2 text-xs leading-relaxed text-zinc-500">定位原文：{comment.sourceText}</p>}
-                    {replies.map(reply => <div key={reply.id} className="mt-3 border-t border-zinc-200/80 pt-3"><p className="text-xs font-semibold text-indigo-700">{USERS.find(user => user.id === reply.authorId)?.name || '成员'}的回复</p><p className="mt-1 text-sm leading-relaxed text-zinc-700">{reply.content}</p></div>)}
-                    {replies.length < 7 && <div className="mt-3 border-t border-zinc-200/80 pt-3"><textarea value={replyDrafts[comment.id] || ''} onChange={event => setReplyDrafts(previous => ({ ...previous, [comment.id]: event.target.value }))} placeholder={`回复${author?.name || '对方'}…`} className="min-h-16 w-full resize-none rounded-lg border border-zinc-200 bg-white p-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /><div className="mt-2 flex justify-end"><button onClick={() => submitReply(comment)} disabled={!replyDrafts[comment.id]?.trim()} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">发送回复</button></div></div>}
+                    {comment.sourceText && <p className="mt-2 border-l-2 border-violet-400 pl-2 text-xs leading-relaxed text-zinc-500">定位原文：{comment.sourceText}</p>}
+                    {replies.map(reply => <div key={reply.id} className="mt-3 border-t border-zinc-200/80 pt-3"><p className="text-xs font-semibold text-zinc-900">{USERS.find(user => user.id === reply.authorId)?.name || '成员'}的回复</p><p className="mt-1 text-sm leading-relaxed text-zinc-700">{reply.content}</p></div>)}
+                    {replies.length < 7 && <div className="mt-3 border-t border-zinc-200/80 pt-3"><textarea value={replyDrafts[comment.id] || ''} onChange={event => setReplyDrafts(previous => ({ ...previous, [comment.id]: event.target.value }))} placeholder={`回复${author?.name || '对方'}…`} className="min-h-16 w-full resize-none rounded-lg border border-zinc-200 bg-white p-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /><div className="mt-2 flex justify-end"><button onClick={() => submitReply(comment)} disabled={!replyDrafts[comment.id]?.trim()} className="rounded-lg bg-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-500 transition-colors enabled:bg-zinc-950 enabled:text-white enabled:hover:bg-zinc-800 disabled:cursor-not-allowed">发送回复</button></div></div>}
                   </div>;
                 })}
                 {comments.filter(comment => comment.status !== 'resolved').length === 0 && <div className="py-12 text-center text-sm text-zinc-400">暂时没有待处理的文档评论</div>}
@@ -1345,80 +1561,58 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 const role = roles.find(r => r.id === roleId);
                 const isLoading = loadingRoles[roleId];
                 const isViewing = viewingDerivativeRole === roleId;
+                const derivation = generatedDerivations[roleId];
+                const isCancelled = cancelledRoles.has(roleId);
+                // A stopped regeneration stays visually in the neutral state
+                // until the user explicitly starts it again, even if an older
+                // version remains cached in memory.
+                const isComplete = Boolean(derivation) && !isLoading && !isCancelled;
+                const relatedDocs = displayedRelatedDocs[roleId] || derivation?.relatedDocumentIds || activeDerivativeDocs;
+                const hasRelatedDocs = relatedDocs.length > 0;
                 
                 return (
-                  <div key={roleId} className={`p-5 border-b border-zinc-100 transition-colors ${isViewing ? 'bg-indigo-50/40' : ''}`}>
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center shrink-0">
-                            <User size={14} className="text-zinc-500" />
-                          </div>
-                          <span className="text-sm font-semibold text-zinc-900">
-                            {role?.name}
-                          </span>
-                        </div>
-                        {isDerivationOutdated(roleId) && <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">原文已更新</span>}
-                      </div>
-                      
-                      {(generatedDerivations[roleId]?.relatedDocumentIds || activeDerivativeDocs).length > 0 && (
-                        <div className="flex flex-col gap-1.5 mt-1">
-                          {(generatedDerivations[roleId]?.relatedDocumentIds || activeDerivativeDocs).map(docId => {
-                            const d = allDocs.find(x => x.id === docId);
-                            return (
-                               <span key={docId} className="text-xs px-2.5 py-1.5 bg-zinc-50 text-zinc-600 rounded-md flex items-center gap-1.5 truncate">
-                                 <FileText size={12} className="shrink-0 text-zinc-400" /> 
-                                 <span className="truncate">{d?.title}</span>
-                               </span>
-                            )
-                          })}
-                        </div>
-                      )}
-
-                      {isLoading ? (
-                        <div className="mt-1 flex items-center gap-2 text-xs text-indigo-600 bg-indigo-50/60 p-2.5 rounded-lg border border-indigo-100/60">
-                          <Loader2 size={14} className="animate-spin shrink-0" />
-                          <span className="font-medium">AI 正在生成专属视图...</span>
-                        </div>
-                      ) : (
-                        <div className="mt-2">
-                          {generationErrors[roleId] && <p className="mb-2 rounded-lg bg-rose-50 p-2 text-xs leading-relaxed text-rose-700">{generationErrors[roleId]}</p>}
-                          {isDerivationOutdated(roleId) && <p className="mb-2 text-xs leading-relaxed text-amber-700">这个衍生文档基于旧版原文。重新生成后会恢复为最新版本。</p>}
-                          <div className="flex gap-2">
-                          <button 
-                            onClick={() => toggleDerivativeView(roleId, isViewing)}
-                            disabled={Boolean(pendingDerivativeRole)}
-                            className={`flex-[1.2] text-xs font-medium py-2 rounded-lg transition-colors flex items-center justify-center disabled:cursor-wait disabled:opacity-60 ${
-                              isViewing 
-                                ? 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100' 
-                                : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
-                            }`}
-                          >
-                            {isViewing ? '关闭视图' : '查看文档'}
-                          </button>
-                          {canManageDerivations && <button 
-                            onClick={() => {
-                              void generateForRole(roleId, generatedDerivations[roleId]?.relatedDocumentIds || activeDerivativeDocs);
-                            }}
-                            className="flex-1 text-xs font-medium py-2 bg-zinc-100 text-zinc-700 rounded-lg hover:bg-zinc-200 transition-colors flex items-center justify-center"
-                          >
-                            重新生成
-                          </button>}
-                          {canManageDerivations && <button 
-                            onClick={() => onApplyDerivation(doc.id, roleId, !appliedRoleIds.has(roleId))}
-                            className={`flex-[1.5] text-xs font-medium py-2 rounded-lg transition-colors flex items-center justify-center ${
-                              appliedRoleIds.has(roleId)
-                                ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
-                                : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm'
-                            }`}
-                          >
-                            {appliedRoleIds.has(roleId) ? '已应用' : '应用'}
-                          </button>}
-                          </div>
-                        </div>
-                      )}
+                  <section key={roleId} className="group relative mx-5 my-3 overflow-hidden rounded-[18px] border border-zinc-200 bg-white p-4 transition-[height,background-color] duration-200 hover:bg-zinc-50">
+                    {canManageDerivations && <button type="button" onClick={() => closeDerivativeRole(roleId)} aria-label={`关闭${role?.name || '角色'}的衍生文档`} title="关闭衍生文档" className="absolute right-3 top-3 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-zinc-200 bg-white/95 text-zinc-400 opacity-0 shadow-sm transition-all duration-200 hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-700 focus:opacity-100 group-hover:opacity-100"><X size={14} /></button>}
+                    <div aria-hidden="true" className="pointer-events-none absolute inset-0 origin-bottom-right transition-transform duration-200 ease-out group-hover:-rotate-[4deg] motion-reduce:transform-none">
+                      <svg viewBox="0 0 280 210" preserveAspectRatio="none" className="absolute inset-0 h-full w-full text-zinc-300" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M280 12 178 46Q162 51 167 66L195 210H280Z" fill="white" stroke="none" />
+                        <path d="M280 12 178 46Q162 51 167 66L195 210" />
+                      </svg>
+                      {isComplete && <div className="absolute inset-y-0 right-0 w-[142px] [clip-path:polygon(100%_6%,28%_22%,20%_31%,40%_100%,100%_100%)]"><div className="absolute -right-2 top-[50px] w-[112px] -rotate-[16deg] space-y-3 opacity-70"><span className="block h-3 rounded-sm bg-zinc-100" /><span className="block h-3 w-[84%] rounded-sm bg-zinc-100" /></div></div>}
                     </div>
-                  </div>
+                    <div className={`relative flex flex-col ${isLoading ? 'min-h-[208px]' : isComplete ? (hasRelatedDocs ? 'min-h-[166px]' : 'min-h-[132px]') : 'min-h-[166px]'}`}>
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 text-zinc-500"><User size={16} strokeWidth={1.8} /></span>
+                        <span className="text-sm font-semibold text-zinc-900">{role?.name}</span>
+                      </div>
+
+                      {hasRelatedDocs && <div className="mt-3 space-y-1">
+                        {relatedDocs.map(docId => {
+                          const relatedDoc = allDocs.find(item => item.id === docId);
+                          if (!relatedDoc) return null;
+                          return <button key={docId} type="button" onClick={() => switchRelatedDocument(roleId, docId, relatedDocs)} className="flex max-w-[138px] items-center gap-1.5 rounded-md bg-zinc-100 px-2.5 py-1.5 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-200 hover:text-zinc-950" title={`切换到 ${relatedDoc.title}`}><FileText size={13} className="shrink-0" /><span className="truncate">{relatedDoc.title}</span></button>;
+                        })}
+                      </div>}
+
+                      {isLoading ? <div className="mt-4 space-y-2 text-xs leading-4">
+                        <p className="flex items-center gap-1.5 text-zinc-400"><MessageCircle size={14} fill="currentColor" strokeWidth={0} />大模型思考已完成</p>
+                        <p className="flex items-center gap-1.5 font-medium text-zinc-950"><PenLine size={14} />衍生文档撰写中……</p>
+                        <p className="flex items-center gap-1.5 text-zinc-400"><PanelsTopLeft size={14} />制作衍生卡片中……</p>
+                      </div> : isComplete ? <p className="mt-4 flex items-center gap-1.5 text-xs text-zinc-400"><Check size={14} />衍生文档已完成</p> : <p className="mt-4 text-xs text-zinc-400">{isCancelled ? '生成已停止，可重新生成。' : '等待生成衍生文档。'}</p>}
+
+                      <div className="mt-auto pt-2">
+                        {generationErrors[roleId] && <p className="mb-3 rounded-lg bg-rose-50 p-2 text-xs leading-relaxed text-rose-700">{generationErrors[roleId]}</p>}
+                        {isDerivationOutdated(roleId) && <p className="mb-3 text-xs leading-relaxed text-amber-700">这个衍生文档基于旧版原文。</p>}
+                        <div className="flex gap-1.5">
+                          {isLoading ? <button type="button" onClick={() => stopGeneration(roleId)} className="h-8 min-w-[104px] whitespace-nowrap rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-500 transition-colors hover:border-zinc-500 hover:text-zinc-900">停止</button> : <>
+                            {isComplete && <button onClick={() => toggleDerivativeView(roleId, isViewing)} disabled={Boolean(pendingDerivativeRole)} className="h-8 min-w-0 flex-1 whitespace-nowrap rounded-md bg-zinc-100 px-2 text-xs font-semibold text-zinc-900 transition-colors hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-60">{isViewing ? '关闭视图' : '查看文档'}</button>}
+                            {canManageDerivations && <button onClick={() => void generateForRole(roleId, derivation?.relatedDocumentIds || activeDerivativeDocs)} className="h-8 min-w-0 flex-1 whitespace-nowrap rounded-md bg-zinc-100 px-2 text-xs font-semibold text-zinc-900 transition-colors hover:bg-zinc-200">重新生成</button>}
+                            {canManageDerivations && isComplete && <button onClick={() => onApplyDerivation(doc.id, roleId, !appliedRoleIds.has(roleId))} className={`h-8 min-w-0 flex-1 whitespace-nowrap rounded-md px-2 text-xs font-semibold transition-colors ${appliedRoleIds.has(roleId) ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-zinc-950 text-white hover:bg-zinc-800'}`}>{appliedRoleIds.has(roleId) ? '已应用' : '应用'}</button>}
+                          </>}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
                 );
               })}
               </>}
@@ -1441,8 +1635,27 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
         {isChallengeModalOpen && <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-900/50 p-4">
           <motion.div initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between"><div><h3 className="text-lg font-semibold text-zinc-900">模拟质疑</h3><p className="mt-1 text-sm leading-relaxed text-zinc-500">选择角色，让他们轮流从专业视角挑战这份文档。</p></div><button onClick={() => setIsChallengeModalOpen(false)} aria-label="关闭模拟质疑" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100"><X size={18} /></button></div>
-            <div className="mt-6 grid grid-cols-2 gap-3">{roles.map(role => { const selected = challengeRoleIds.has(role.id); return <button key={role.id} type="button" onClick={() => toggleChallengeRole(role.id)} className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${selected ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}><span>{role.name}</span>{selected && <Check size={16} />}</button>; })}</div>
-            <div className="mt-6 flex justify-end gap-3"><button onClick={() => setIsChallengeModalOpen(false)} className="px-4 py-2 text-sm font-medium text-zinc-600">取消</button><button disabled={!challengeRoleIds.size} onClick={startChallenge} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-45">开始模拟</button></div>
+            <div className="mt-6 grid grid-cols-2 gap-3">{roles.map(role => { const selected = challengeRoleIds.has(role.id); return <button key={role.id} type="button" onClick={() => toggleChallengeRole(role.id)} className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${selected ? 'border-zinc-400 bg-zinc-100 text-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}><span>{role.name}</span>{selected && <Check size={16} />}</button>; })}</div>
+            <div className="mt-5 flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+              <span className="text-sm font-medium text-zinc-900">每个角色</span>
+              <label className="flex items-center gap-2 text-sm text-zinc-500">
+                <span className="sr-only">每个角色的发言句数</span>
+                <select
+                  value={challengeSentencesPerRole}
+                  aria-label="每个角色的发言句数"
+                  onChange={event => setChallengeSentencesPerRole(Number(event.target.value) as 1 | 2)}
+                  onWheel={event => {
+                    event.preventDefault();
+                    setChallengeSentencesPerRole(current => Math.max(1, Math.min(2, current + (event.deltaY > 0 ? 1 : -1))) as 1 | 2);
+                  }}
+                  className="cursor-ns-resize rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-semibold text-zinc-950 outline-none transition-colors focus:border-zinc-950"
+                >
+                  <option value={1}>1 句</option>
+                  <option value={2}>2 句</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-3"><button onClick={() => setIsChallengeModalOpen(false)} className="px-4 py-2 text-sm font-medium text-zinc-600">取消</button><button disabled={!challengeRoleIds.size} onClick={startChallenge} className="rounded-lg bg-zinc-950 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400">开始模拟</button></div>
           </motion.div>
         </div>}
       </AnimatePresence>
@@ -1477,7 +1690,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                   <h4 className="text-sm font-medium text-zinc-900">角色选择 (可多选)</h4>
                   <button 
                     onClick={() => setIsCreateRoleModalOpen(true)}
-                    className="text-xs font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                    className="flex items-center gap-1 text-xs font-medium text-indigo-600 transition-colors hover:text-indigo-700"
                   >
                     <Plus size={14} />
                     新建角色
@@ -1496,7 +1709,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                           isApplied
                             ? 'cursor-not-allowed border-emerald-200 bg-emerald-50 text-emerald-700'
                             : isSelected 
-                            ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                            ? 'border-zinc-400 bg-zinc-100 text-zinc-900'
                             : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'
                         }`}
                       >
@@ -1511,13 +1724,9 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               <div className="mb-6">
                 <div className="mb-3 flex items-baseline justify-between gap-3"><h4 className="text-sm font-medium text-zinc-900">关联文档</h4><span className="text-xs text-zinc-400">主文档 + 1 篇关联文档</span></div>
                 
-                <div className="relative mb-3">
-                  <Sparkles size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-500" />
-                  <input 
-                    type="text" 
-                    placeholder="AI 搜索相关文档..." 
-                    className="w-full bg-zinc-50 border border-zinc-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                  />
+                <div aria-disabled="true" className="mb-3 flex cursor-not-allowed items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-400">
+                  <Sparkles size={14} className="shrink-0 text-indigo-500" />
+                  <span>AI 搜索企业内相关文档，功能开发中……</span>
                 </div>
 
                 <div className="max-h-48 overflow-y-auto border border-zinc-200 rounded-xl divide-y divide-zinc-100">
@@ -1527,17 +1736,17 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                       <button
                         key={d.id}
                         onClick={() => toggleDocSelection(d.id)}
-                        className={`w-full flex items-center justify-between p-3 text-left transition-colors hover:bg-zinc-50 ${isSelected ? 'bg-indigo-50/50' : ''}`}
+                        className={`flex w-full items-center justify-between p-3 text-left transition-colors hover:bg-zinc-50 ${isSelected ? 'bg-zinc-100' : ''}`}
                       >
                         <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? 'bg-indigo-100 text-indigo-600' : 'bg-zinc-100 text-zinc-500'}`}>
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isSelected ? 'bg-zinc-200 text-zinc-700' : 'bg-zinc-100 text-zinc-500'}`}>
                             <FileText size={16} />
                           </div>
-                          <span className={`text-sm ${isSelected ? 'font-medium text-indigo-900' : 'text-zinc-700'}`}>
+                          <span className={`text-sm ${isSelected ? 'font-medium text-zinc-900' : 'text-zinc-700'}`}>
                             {d.title}
                           </span>
                         </div>
-                        {isSelected && <Check size={16} className="text-indigo-600" />}
+                        {isSelected && <Check size={16} className="text-zinc-900" />}
                       </button>
                     );
                   })}
@@ -1549,7 +1758,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                   <h4 className="text-sm font-medium text-zinc-900 mb-2">已选择关联文档</h4>
                   <div className="flex flex-wrap gap-2">
                     {selectedDocs.map(d => (
-                      <span key={d.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-50 border border-indigo-100 text-xs font-medium text-indigo-700">
+                      <span key={d.id} className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-900">
                         <FileText size={12} />
                         {d.title}
                       </span>
@@ -1573,7 +1782,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 <button 
                   onClick={handleGenerate}
                   disabled={(Array.from(selectedRoleIds) as string[]).filter(roleId => !appliedRoleIds.has(roleId)).length === 0}
-                  className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                  className="rounded-lg bg-zinc-950 px-6 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400"
                 >
                   生成衍生
                 </button>

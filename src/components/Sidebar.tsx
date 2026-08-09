@@ -9,6 +9,8 @@ interface SidebarProps {
   setActiveApp: (app: AppIdentifier) => void;
   activeUserId: string;
   setActiveUserId: (id: string) => void;
+  taskUnreadCount: number;
+  taskPulseKey: number;
 }
 
 const apps: { id: AppIdentifier; icon: any; label: string }[] = [
@@ -18,7 +20,7 @@ const apps: { id: AppIdentifier; icon: any; label: string }[] = [
   { id: 'tasks', icon: CheckSquare, label: '任务' },
 ];
 
-export function Sidebar({ activeApp, setActiveApp, activeUserId, setActiveUserId }: SidebarProps) {
+export function Sidebar({ activeApp, setActiveApp, activeUserId, setActiveUserId, taskUnreadCount, taskPulseKey }: SidebarProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const activeUser = USERS.find(u => u.id === activeUserId);
 
@@ -56,6 +58,7 @@ export function Sidebar({ activeApp, setActiveApp, activeUserId, setActiveUserId
                 />
               )}
               <Icon size={20} className="relative z-10" strokeWidth={isActive ? 2.5 : 2} />
+              {app.id === 'tasks' && taskUnreadCount > 0 && <motion.span key={taskPulseKey} initial={{ scale: 0.65 }} animate={{ scale: [1, 1.45, 1] }} transition={{ duration: 0.38, ease: 'easeOut' }} className="absolute -right-1 -top-1 z-20 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-zinc-100 bg-rose-500 px-1 text-[10px] font-bold text-white">{taskUnreadCount}</motion.span>}
             </button>
           );
         })}

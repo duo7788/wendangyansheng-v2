@@ -110,9 +110,9 @@ export function Directory({ activeApp, activeItemId, setActiveItemId, libraries 
                   message.recipientId === activeUserId && !message.readByUserIds?.includes(activeUserId)
                 ).length;
                 const unreadEvents = isOwner
-                  ? comments.filter(comment => comment.authorId === chat.user.id && !comment.readByOwner)
+                  ? comments.filter(comment => !comment.readByOwner && (comment.replies?.at(-1)?.authorId || comment.authorId) === chat.user.id)
                   : chat.user.id === activeUserId
-                    ? comments.filter(comment => comment.authorId === 'u_jobs' && comment.recipientId === activeUserId && !comment.readByRecipient)
+                    ? comments.filter(comment => !comment.readByRecipient && (comment.replies?.at(-1)?.authorId || comment.authorId) !== activeUserId)
                     : [];
                 const commentGroups = Array.from(new Map(unreadEvents.map(comment => [comment.docId, comment])).values());
                 return <div key={chat.id}>

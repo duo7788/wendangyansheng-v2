@@ -68,6 +68,19 @@ export interface DocComment {
   replies?: Array<{ id: string; authorId: string; content: string; createdAt: string }>;
 }
 
+/** A task collected from a simulated challenge. Unlike a comment, it is not
+ * anchored to a source-text fragment and therefore has no original-text cue. */
+export interface ChallengeTask {
+  id: string;
+  docId: string;
+  docTitle: string;
+  roleName: string;
+  content: string;
+  createdAt: string;
+  unread: boolean;
+  status: 'open' | 'resolved';
+}
+
 /** A lightweight audit entry created when a role document is regenerated.
  * It intentionally stores no source-document copy. */
 export interface DerivationSnapshot {

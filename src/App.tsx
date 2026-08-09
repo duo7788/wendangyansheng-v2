@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Directory } from './components/Directory';
 import { Workspace } from './components/Workspace';
-import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation } from './types';
+import { AppIdentifier, DocLibrary, DocItem, ChatItem, DocComment, DerivationSnapshot, GeneratedDerivation, ChallengeTask } from './types';
 import { mockChats as initialMockChats, mockLibraries as initialMockLibraries } from './data';
 
 export const USERS = [
@@ -22,9 +22,18 @@ const USER_ROLE_BY_ID: Record<string, string> = {
   u_jobs: 'product',
 };
 
+const getLatestThreadAuthorId = (thread: DocComment) => thread.replies?.at(-1)?.authorId || thread.authorId;
+
+const getReplyRecipientId = (thread: DocComment, authorId: string) => {
+  const latestAuthorId = getLatestThreadAuthorId(thread);
+  if (latestAuthorId !== authorId) return latestAuthorId;
+  if (thread.authorId !== authorId) return thread.authorId;
+  return thread.recipientId && thread.recipientId !== authorId ? thread.recipientId : 'u_jobs';
+};
+
 export default function App() {
   const [activeApp, setActiveApp] = useState<AppIdentifier>('messages');
-  const [activeItemId, setActiveItemId] = useState<string | null>('c1');
+  const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [libraries, setLibraries] = useState<DocLibrary[]>(initialMockLibraries);
   const [isDirCollapsed, setIsDirCollapsed] = useState(false);
   const [chats, setChats] = useState<ChatItem[]>(initialMockChats);
@@ -36,6 +45,25 @@ export default function App() {
   // Comments are real user-created workspace state.  Do not pre-seed them:
   // a newly opened mock document should look unused.
   const [comments, setComments] = useState<DocComment[]>([]);
+  const [challengeTasks, setChallengeTasks] = useState<ChallengeTask[]>([]);
+  const [taskEntryUnreadCount, setTaskEntryUnreadCount] = useState(0);
+  const [taskPulseKey, setTaskPulseKey] = useState(0);
+
+  const handleAddChallengeTask = useCallback((task: Omit<ChallengeTask, 'createdAt' | 'unread' | 'status'>) => {
+    setChallengeTasks(previous => {
+      if (previous.some(item => item.id === task.id)) return previous;
+      return [...previous, {
+        ...task,
+        createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        unread: true,
+        status: 'open',
+      }];
+    });
+    setTaskEntryUnreadCount(count => count + 1);
+    setTaskPulseKey(key => key + 1);
+  }, []);
+  const handleMarkChallengeTaskRead = useCallback((taskId: string) => setChallengeTasks(previous => previous.map(task => task.id === taskId ? { ...task, unread: false } : task)), []);
+  const handleResolveChallengeTask = useCallback((taskId: string) => setChallengeTasks(previous => previous.map(task => task.id === taskId ? { ...task, unread: false, status: 'resolved' } : task)), []);
 
   const handleShareDoc = (chatId: string, doc: DocItem) => {
     const recipientId = chats.find(chat => chat.id === chatId)?.user.id;
@@ -143,26 +171,40 @@ export default function App() {
 
   const handleAddComment = (comment: Omit<DocComment, 'id' | 'createdAt'>) => {
     const createdAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const isOwnerReply = comment.authorId === 'u_jobs' && Boolean(comment.replyToId);
+    if (!comment.replyToId && comment.authorId !== activeUserId && comment.recipientId === activeUserId) {
+      setTaskEntryUnreadCount(count => count + 1);
+      setTaskPulseKey(key => key + 1);
+    }
     if (comment.replyToId) {
-      setComments(prev => prev.map(thread => thread.id !== comment.replyToId ? thread : {
-        ...thread,
-        replies: [...(thread.replies || []), { id: `reply_${Date.now()}`, authorId: comment.authorId, content: comment.content, createdAt }],
+      const thread = comments.find(item => item.id === comment.replyToId);
+      const recipientId = thread ? getReplyRecipientId(thread, comment.authorId) : comment.recipientId || 'u_jobs';
+      setComments(prev => prev.map(item => item.id !== comment.replyToId ? item : {
+        ...item,
+        readByOwner: recipientId !== 'u_jobs',
+        readByRecipient: recipientId === 'u_jobs',
+        replies: [...(item.replies || []), { id: `reply_${Date.now()}`, authorId: comment.authorId, content: comment.content, createdAt }],
       }));
+      const docTitle = libraries.flatMap(library => library.docs).find(doc => doc.id === comment.docId)?.title || '文档';
+      setChats(prev => prev.map(chat => chat.user.id === recipientId ? {
+        ...chat,
+        lastMessage: `[回复评论] ${docTitle}`,
+        timestamp: createdAt,
+      } : chat));
+      return;
     } else {
       setComments(prev => [...prev, {
         ...comment,
         id: `comment_${Date.now()}`,
         createdAt,
-        readByOwner: isOwnerReply,
-        readByRecipient: isOwnerReply ? false : undefined,
+        readByOwner: comment.authorId === 'u_jobs',
+        readByRecipient: comment.authorId === 'u_jobs' ? false : undefined,
       }]);
     }
     const docTitle = libraries.flatMap(library => library.docs).find(doc => doc.id === comment.docId)?.title || '文档';
-    const counterpartId = isOwnerReply ? comment.recipientId : comment.authorId;
+    const counterpartId = comment.authorId === 'u_jobs' ? comment.recipientId : comment.authorId;
     setChats(prev => prev.map(chat => chat.user.id === counterpartId ? {
       ...chat,
-      lastMessage: `${isOwnerReply ? '[回复评论]' : '[文档评论]'} ${docTitle}`,
+      lastMessage: `[文档评论] ${docTitle}`,
       timestamp: createdAt,
     } : chat));
   };
@@ -170,8 +212,8 @@ export default function App() {
   const handleMarkCommentsRead = (docId: string, viewerId: string) => {
     setComments(prev => prev.map(comment => {
       if (comment.docId !== docId) return comment;
-      if (viewerId === 'u_jobs' && comment.authorId !== 'u_jobs') return { ...comment, readByOwner: true };
-      if (comment.authorId === 'u_jobs' && comment.recipientId === viewerId) return { ...comment, readByRecipient: true };
+      if (viewerId === 'u_jobs') return { ...comment, readByOwner: true };
+      if (getLatestThreadAuthorId(comment) !== viewerId) return { ...comment, readByRecipient: true };
       return comment;
     }));
   };
@@ -179,10 +221,18 @@ export default function App() {
   const handleReplyToComment = (commentId: string, content: string) => {
     const value = content.trim();
     if (!value) return;
+    const thread = comments.find(comment => comment.id === commentId);
+    if (!thread) return;
+    const recipientId = getReplyRecipientId(thread, activeUserId);
+    const createdAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setComments(previous => previous.map(comment => comment.id !== commentId ? comment : {
       ...comment,
-      replies: [...(comment.replies || []), { id: `reply_${Date.now()}`, authorId: activeUserId, content: value, createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }],
+      readByOwner: recipientId !== 'u_jobs',
+      readByRecipient: recipientId === 'u_jobs',
+      replies: [...(comment.replies || []), { id: `reply_${Date.now()}`, authorId: activeUserId, content: value, createdAt }],
     }));
+    const docTitle = libraries.flatMap(library => library.docs).find(doc => doc.id === thread.docId)?.title || '文档';
+    setChats(previous => previous.map(chat => chat.user.id === recipientId ? { ...chat, lastMessage: `[回复评论] ${docTitle}`, timestamp: createdAt } : chat));
   };
 
   const handleResolveComment = (commentId: string) => setComments(previous => previous.map(comment => comment.id === commentId ? { ...comment, status: 'resolved', resolvedById: activeUserId } : comment));
@@ -220,6 +270,7 @@ export default function App() {
     setActiveApp(app);
     setActiveItemId(null);
     setIsDirCollapsed(false);
+    if (app === 'tasks') setTaskEntryUnreadCount(0);
   };
 
   const handleSwitchUser = (userId: string) => {
@@ -236,6 +287,8 @@ export default function App() {
         setActiveApp={handleSelectApp} 
         activeUserId={activeUserId}
         setActiveUserId={handleSwitchUser}
+        taskUnreadCount={taskEntryUnreadCount}
+        taskPulseKey={taskPulseKey}
       />
       <Directory 
         activeApp={activeApp} 
@@ -276,6 +329,10 @@ export default function App() {
         onReplyToComment={handleReplyToComment}
         onResolveComment={handleResolveComment}
         onDeleteCommentRecord={handleDeleteCommentRecord}
+        challengeTasks={challengeTasks}
+        onAddChallengeTask={handleAddChallengeTask}
+        onMarkChallengeTaskRead={handleMarkChallengeTaskRead}
+        onResolveChallengeTask={handleResolveChallengeTask}
         isDirCollapsed={isDirCollapsed}
         setIsDirCollapsed={setIsDirCollapsed}
         setActiveApp={setActiveApp}

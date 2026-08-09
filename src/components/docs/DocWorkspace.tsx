@@ -1306,7 +1306,14 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     }, 1000);
   };
 
-  const originalHighlights = comments.filter(comment => comment.status !== 'resolved').map(comment => comment.sourceText?.trim()).filter((text): text is string => Boolean(text));
+  // New comments store the exact source selection in `sourceText`.  Older
+  // comments and comments made from a derivative can have a stale source
+  // description, so keep the actual selected words as a safe fallback.
+  const originalHighlights = comments
+    .filter(comment => comment.status !== 'resolved')
+    .flatMap(comment => [comment.sourceText, comment.selectedText]
+      .map(text => text?.trim())
+      .filter((text): text is string => Boolean(text)));
   const openCommentContext = () => {
     setCommentAnchor(null);
     setIsCommentComposerOpen(false);
@@ -1321,20 +1328,45 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   // Imported HTML is rendered as document markup rather than React text
   // nodes. Apply the same persisted comment highlight after each comment
   // change so selection comments behave identically in every document type.
+  // The effect also follows `showOriginal`: opening an existing comment can
+  // mount the original document after this component has already rendered.
   useEffect(() => {
     const root = originalDocumentRef.current?.querySelector<HTMLElement>('.imported-doc');
     if (!root) return;
     root.querySelectorAll<HTMLElement>('[data-comment-highlight]').forEach(mark => mark.replaceWith(document.createTextNode(mark.textContent || '')));
+    root.querySelectorAll<HTMLElement>('[data-comment-highlight-block]').forEach(block => {
+      block.removeAttribute('data-comment-highlight-block');
+      block.removeAttribute('tabindex');
+      block.removeAttribute('title');
+      block.classList.remove('cursor-pointer', 'rounded', 'bg-amber-100/80', 'px-1', 'transition-colors', 'hover:bg-amber-200/80');
+      block.onclick = null;
+      block.onkeydown = null;
+    });
     originalHighlights.forEach(phrase => {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const locations: Array<{ node: Text; offset: number }> = [];
+      let searchableText = '';
       let node = walker.nextNode() as Text | null;
       while (node) {
         const value = node.textContent || '';
-        const index = value.indexOf(phrase);
-        if (index >= 0 && node.parentElement?.closest('[data-comment-highlight]') === null) {
+        for (let offset = 0; offset < value.length; offset += 1) {
+          const normalizedCharacter = normalizeCitationText(value[offset]);
+          for (const character of normalizedCharacter) {
+            searchableText += character;
+            locations.push({ node, offset });
+          }
+        }
+        node = walker.nextNode() as Text | null;
+      }
+      const normalizedPhrase = normalizeCitationText(phrase);
+      const start = searchableText.indexOf(normalizedPhrase);
+      const startLocation = start >= 0 ? locations[start] : undefined;
+      const endLocation = start >= 0 ? locations[start + normalizedPhrase.length - 1] : undefined;
+      if (startLocation && endLocation && startLocation.node.parentElement?.closest('[data-comment-highlight]') === null) {
+        if (startLocation.node === endLocation.node) {
           const range = document.createRange();
-          range.setStart(node, index);
-          range.setEnd(node, index + phrase.length);
+          range.setStart(startLocation.node, startLocation.offset);
+          range.setEnd(endLocation.node, endLocation.offset + 1);
           const mark = document.createElement('mark');
           mark.dataset.commentHighlight = 'true';
           mark.tabIndex = 0;
@@ -1343,12 +1375,22 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
           mark.addEventListener('click', openCommentContext);
           mark.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') openCommentContext(); });
           range.surroundContents(mark);
-          break;
+          return;
         }
-        node = walker.nextNode() as Text | null;
+        // A selection may legitimately span inline tags or a line break.
+        // Keep its location visible by highlighting the containing paragraph.
+        const block = startLocation.node.parentElement?.closest<HTMLElement>('p, li, td, th, h1, h2, h3, h4, h5, h6');
+        if (block) {
+          block.dataset.commentHighlightBlock = 'true';
+          block.tabIndex = 0;
+          block.title = '查看文档评论';
+          block.classList.add('cursor-pointer', 'rounded', 'bg-amber-100/80', 'px-1', 'transition-colors', 'hover:bg-amber-200/80');
+          block.onclick = openCommentContext;
+          block.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') openCommentContext(); };
+        }
       }
     });
-  }, [doc.id, doc.content, originalHighlights.join('|')]);
+  }, [doc.id, doc.content, showOriginal, activeSourceDocument.id, originalHighlights.join('|')]);
   const renderDerivativeHighlight = (text: string, citationId?: '1' | '2') => {
     const comment = comments.find(item => (
       (citationId && item.citationId === citationId) ||

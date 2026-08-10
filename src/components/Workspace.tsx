@@ -18,6 +18,7 @@ interface WorkspaceProps {
   libraries: DocLibrary[];
   chats: ChatItem[];
   onAddDoc: (libId: string, doc: DocItem) => void;
+  onAddLibrary: (name: string) => void;
   onUpdateDoc: (docId: string, patch: Partial<DocItem>) => void;
   onShareDoc: (chatIds: string[], doc: DocItem) => void;
   onSendMessage: (chatId: string, content: string) => void;
@@ -47,7 +48,7 @@ interface WorkspaceProps {
   setActiveItemId: (id: string | null) => void;
 }
 
-export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onUpdateDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, generatedDerivationContents, onStoreGeneratedDerivation, derivationSnapshots, onRecordDerivationSnapshot, comments, onAddComment, onMarkCommentsRead, onReplyToComment, onResolveComment, onDeleteCommentRecord, challengeTasks, onAddChallengeTask, onMarkChallengeTaskRead, onResolveChallengeTask, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
+export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc, onAddLibrary, onUpdateDoc, onShareDoc, onSendMessage, onMarkChatRead, activeUserId, initialDerivativeRole, appliedRoleIds, onApplyDerivation, onGeneratedDerivation, generatedDerivationContents, onStoreGeneratedDerivation, derivationSnapshots, onRecordDerivationSnapshot, comments, onAddComment, onMarkCommentsRead, onReplyToComment, onResolveComment, onDeleteCommentRecord, challengeTasks, onAddChallengeTask, onMarkChallengeTaskRead, onResolveChallengeTask, isDirCollapsed, setIsDirCollapsed, setActiveApp, setActiveItemId }: WorkspaceProps) {
   
   const renderContent = () => {
     if (activeApp === 'tasks') return <TaskWorkspace comments={comments} libraries={libraries} activeUserId={activeUserId} onReply={onReplyToComment} onResolve={onResolveComment} onDelete={onDeleteCommentRecord} challengeTasks={challengeTasks} onMarkChallengeTaskRead={onMarkChallengeTaskRead} onResolveChallengeTask={onResolveChallengeTask} />;
@@ -72,7 +73,7 @@ export function Workspace({ activeApp, activeItemId, libraries, chats, onAddDoc,
     }
     if (!activeItemId) {
       if (activeApp === 'docs') {
-        return <DocEmptyState libraries={libraries} onAddDoc={onAddDoc} />;
+        return <DocEmptyState libraries={libraries} onAddDoc={onAddDoc} onAddLibrary={onAddLibrary} />;
       }
       if (activeApp === 'messages') {
         return (

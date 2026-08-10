@@ -323,6 +323,11 @@ export default function App() {
     if (doc.isLocalFile) saveLocalDocument({ libraryId: libId, document: doc }).catch(() => undefined);
     setActiveItemId(doc.id);
   };
+  const handleAddLibrary = (name: string) => {
+    const library: DocLibrary = { id: `lib-new-${Date.now()}`, name, docs: [] };
+    setLibraries(previous => [library, ...previous]);
+    setActiveItemId(null);
+  };
   const handleUpdateDoc = (docId: string, patch: Partial<DocItem>) => setLibraries(prev => prev.map(library => ({ ...library, docs: library.docs.map(doc => {
     if (doc.id !== docId) return doc;
     const updated = { ...doc, ...patch, updatedAt: '刚刚' };
@@ -374,6 +379,7 @@ export default function App() {
         libraries={libraries}
         chats={chats}
         onAddDoc={handleAddDoc}
+        onAddLibrary={handleAddLibrary}
         onUpdateDoc={handleUpdateDoc}
         onShareDoc={handleShareDoc}
         onSendMessage={handleSendMessage}

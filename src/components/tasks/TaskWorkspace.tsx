@@ -4,6 +4,20 @@ import { CheckCircle2, ChevronDown, CircleDot, MessageSquareMore, Send, Trash2 }
 import { ChallengeTask, DocComment, DocLibrary } from '../../types';
 import { USERS } from '../../App';
 
+const createdAtTimestamp = (value: string) => {
+  const nativeTimestamp = Date.parse(value);
+  if (!Number.isNaN(nativeTimestamp)) return nativeTimestamp;
+  const dateTime = value.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
+  if (dateTime) return new Date(new Date().getFullYear(), Number(dateTime[1]) - 1, Number(dateTime[2]), Number(dateTime[3]), Number(dateTime[4])).getTime();
+  const timeOnly = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (timeOnly) {
+    const today = new Date();
+    today.setHours(Number(timeOnly[1]), Number(timeOnly[2]), 0, 0);
+    return today.getTime();
+  }
+  return 0;
+};
+
 interface TaskWorkspaceProps {
   comments: DocComment[];
   libraries: DocLibrary[];
@@ -33,6 +47,14 @@ export function TaskWorkspace({ comments, libraries, activeUserId, onReply, onRe
   const resolvedComments = relevantComments.filter(comment => comment.status === 'resolved');
   const openChallengeTasks = challengeTasks.filter(task => task.status === 'open');
   const resolvedChallengeTasks = challengeTasks.filter(task => task.status === 'resolved');
+  const openItems = [
+    ...openChallengeTasks.map(task => ({ kind: 'challenge' as const, item: task })),
+    ...openComments.map(comment => ({ kind: 'comment' as const, item: comment })),
+  ].sort((a, b) => createdAtTimestamp(b.item.createdAt) - createdAtTimestamp(a.item.createdAt));
+  const resolvedItems = [
+    ...resolvedChallengeTasks.map(task => ({ kind: 'challenge' as const, item: task })),
+    ...resolvedComments.map(comment => ({ kind: 'comment' as const, item: comment })),
+  ].sort((a, b) => createdAtTimestamp(b.item.createdAt) - createdAtTimestamp(a.item.createdAt));
   const openCount = openComments.length + openChallengeTasks.length;
 
   const completeChallengeTask = async (taskId: string) => {
@@ -90,5 +112,5 @@ export function TaskWorkspace({ comments, libraries, activeUserId, onReply, onRe
     </article>;
   };
 
-  return <main className="h-full overflow-y-auto bg-white"><div className="mx-auto max-w-7xl px-10 py-12"><header className="mb-9"><p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">任务中心</p><h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-900">任务</h1><p className="mt-2 text-sm text-zinc-500">集中处理从模拟质疑中采纳的事项。</p></header>{challengeTaskError && <p className="mb-5 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{challengeTaskError}</p>}<section><div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-base font-semibold text-zinc-900"><CircleDot size={18} className="text-indigo-600" />待处理 <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">{openCount}</span></h2></div><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{openCount ? <>{openChallengeTasks.map(task => renderChallengeCard(task))}{openComments.map(comment => renderCommentCard(comment))}</> : <div className="col-span-full rounded-2xl border border-dashed border-zinc-200 py-12 text-center text-sm text-zinc-400">目前没有待处理的任务。</div>}</div></section><section className="mt-10 border-t border-zinc-100 pt-6"><button onClick={() => setShowResolved(!showResolved)} className="flex w-full items-center justify-between text-left"><span className="flex items-center gap-2 text-base font-semibold text-zinc-700"><CheckCircle2 size={18} className="text-emerald-600" />已完成 <span className="text-sm font-normal text-zinc-400">{resolvedChallengeTasks.length + resolvedComments.length}</span></span><ChevronDown size={18} className={`text-zinc-400 transition-transform ${showResolved ? 'rotate-180' : ''}`} /></button>{showResolved && <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{resolvedChallengeTasks.length + resolvedComments.length ? <>{resolvedChallengeTasks.map(task => renderChallengeCard(task, true))}{resolvedComments.map(comment => renderCommentCard(comment, true))}</> : <p className="col-span-full py-5 text-sm text-zinc-400">还没有已完成的任务。</p>}</div>}</section></div></main>;
+  return <main className="h-full overflow-y-auto bg-white"><div className="mx-auto max-w-7xl px-10 py-12"><header className="mb-9"><p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">任务中心</p><h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-900">任务</h1><p className="mt-2 text-sm text-zinc-500">集中处理从模拟质疑中采纳的事项。</p></header>{challengeTaskError && <p className="mb-5 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{challengeTaskError}</p>}<section><div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-base font-semibold text-zinc-900"><CircleDot size={18} className="text-indigo-600" />待处理 <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">{openCount}</span></h2></div><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{openCount ? <>{openItems.map(entry => entry.kind === 'challenge' ? renderChallengeCard(entry.item) : renderCommentCard(entry.item))}</> : <div className="col-span-full rounded-2xl border border-dashed border-zinc-200 py-12 text-center text-sm text-zinc-400">目前没有待处理的任务。</div>}</div></section><section className="mt-10 border-t border-zinc-100 pt-6"><button onClick={() => setShowResolved(!showResolved)} className="flex w-full items-center justify-between text-left"><span className="flex items-center gap-2 text-base font-semibold text-zinc-700"><CheckCircle2 size={18} className="text-emerald-600" />已完成 <span className="text-sm font-normal text-zinc-400">{resolvedChallengeTasks.length + resolvedComments.length}</span></span><ChevronDown size={18} className={`text-zinc-400 transition-transform ${showResolved ? 'rotate-180' : ''}`} /></button>{showResolved && <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{resolvedItems.length ? <>{resolvedItems.map(entry => entry.kind === 'challenge' ? renderChallengeCard(entry.item, true) : renderCommentCard(entry.item, true))}</> : <p className="col-span-full py-5 text-sm text-zinc-400">还没有已完成的任务。</p>}</div>}</section></div></main>;
 }

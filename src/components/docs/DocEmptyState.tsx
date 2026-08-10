@@ -6,6 +6,8 @@ import { DocLibrary, DocItem } from '../../types';
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[character] || character);
 
+const DERIVATION_INTRO_URL = 'https://landing-page-five-lyart-62.vercel.app/';
+
 export const formatPlainTextAsDocument = (text: string) => text.split(/\r?\n/).reduce<string[]>((blocks, line) => {
   const value = line.trim();
   if (!value) return blocks;
@@ -80,6 +82,7 @@ export function DocEmptyState({ libraries, onAddDoc, onAddLibrary }: DocEmptySta
       return;
     }
 
+    if (entryOptions[index].id === 'derivation-intro') window.location.assign(DERIVATION_INTRO_URL);
     if (entryOptions[index].id === 'create-document') setIsCreating(true);
     if (entryOptions[index].id === 'import-local') handleImportClick();
     if (entryOptions[index].id === 'create-library') setIsCreatingLibrary(true);

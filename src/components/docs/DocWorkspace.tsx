@@ -1992,7 +1992,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               </div>
 
               <div className="mb-6">
-                <div className="mb-1 flex items-baseline justify-between gap-3"><h4 className="text-sm font-medium text-zinc-900">联合生成资料（可选）</h4><span className="text-xs text-zinc-400">主文档 + {selectedDocs.length} 篇关联文档</span></div>
+                <div className="mb-1 flex items-baseline justify-between gap-3"><div className="flex items-baseline gap-2"><h4 className="text-sm font-medium text-zinc-900">联合生成资料（可选）</h4><span className="text-[11px] font-medium text-zinc-400">持续优化中</span></div><span className="text-xs text-zinc-400">主文档 + {selectedDocs.length} 篇关联文档</span></div>
                 <p className="mb-3 text-xs leading-relaxed text-zinc-500">所选文档会与主文档共同生成适配不同角色的协作视图。</p>
                 
                 <div aria-disabled="true" className="mb-3 flex cursor-not-allowed items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-400">

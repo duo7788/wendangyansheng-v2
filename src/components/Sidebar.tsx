@@ -65,8 +65,10 @@ export function Sidebar({ activeApp, setActiveApp, activeUserId, setActiveUserId
       </nav>
 
       <div className="mt-auto pb-2 w-full px-3 relative">
+        <span className="mb-1 block w-12 text-center text-[10px] font-medium leading-tight text-zinc-500">切换角色</span>
         <button 
           onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+          aria-label="切换角色"
           className={`w-12 h-12 flex items-center justify-center rounded-[14px] transition-colors focus:outline-none ${
             isUserMenuOpen ? 'text-zinc-900 bg-zinc-200/60' : 'text-zinc-500 hover:text-zinc-700 hover:bg-zinc-200/60'
           }`}

@@ -1135,8 +1135,26 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const syncSmallSourceUpdate = async () => {
     if (updateCandidateRoleIds.length === 0) return;
     const staleDerivations = updateCandidateRoleIds.map(roleId => generatedDerivations[roleId]).filter((derivation): derivation is GeneratedDerivation => Boolean(derivation));
-    const replacement = findReplacementFromStaleCitations(staleDerivations, sourceTextForAi)
+    let replacement = findReplacementFromStaleCitations(staleDerivations, sourceTextForAi)
       || getSimpleSourceReplacement(initialSourceTextRef.current, sourceTextForAi);
+    if (!replacement && staleDerivations.length === 1) {
+      setIsPreparingUpdates(true);
+      try {
+        const role = roles.find(item => item.id === updateCandidateRoleIds[0]);
+        const response = await fetch('/api/generate-derivation', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceDocument: { id: doc.id, title: doc.title, content: sourceTextForAi }, role, existingContent: staleDerivations[0].content, resolveSmallPatch: true }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.patch) throw new Error(data.error || '未能识别修改点');
+        replacement = { oldText: data.patch.old_text, newText: data.patch.new_text };
+      } catch (error) {
+        setUpdatePreparationError(error instanceof Error ? error.message : '未能识别修改点');
+        return;
+      } finally {
+        setIsPreparingUpdates(false);
+      }
+    }
     if (!replacement) {
       setUpdatePreparationError('目前仅支持同步一次短文字或数值替换，例如 0–1000 改为 0–2000。');
       return;

@@ -68,11 +68,25 @@ const meaningfulSourceVersion = (content: string) => content
   .normalize('NFKC')
   .replace(/[\s\p{P}\p{S}]+/gu, '');
 
+const findSingleNumericReplacement = (before: string, after: string) => {
+  // Compare complete numeric values/ranges independently from rich-text
+  // structure. A contentEditable blur can normalise line breaks or wrappers,
+  // but it must not prevent 0–10000 → 0–20000 from being recognised.
+  const numberTokens = (text: string) => [...text.matchAll(/[0-9０-９][0-9０-９.,，]*(?:[\-–—][0-9０-９][0-9０-９.,，]*)?/g)].map(match => match[0]);
+  const beforeTokens = numberTokens(before);
+  const afterTokens = numberTokens(after);
+  if (beforeTokens.length !== afterTokens.length) return null;
+  const changed = beforeTokens.flatMap((token, index) => token === afterTokens[index] ? [] : [{ oldText: token, newText: afterTokens[index] }]);
+  return changed.length === 1 ? changed[0] : null;
+};
+
 // This deliberately covers the lightweight editing case in the prototype:
 // one short value or wording replacement (for example, 0–1000 → 0–2000).
 // It is not used for structural or multi-location document rewrites.
 const getSimpleSourceReplacement = (before: string, after: string) => {
   if (before === after) return null;
+  const numericReplacement = findSingleNumericReplacement(before, after);
+  if (numericReplacement) return numericReplacement;
   let start = 0;
   while (start < before.length && start < after.length && before[start] === after[start]) start += 1;
   let beforeStart = start;
@@ -98,7 +112,9 @@ const getSimpleSourceReplacement = (before: string, after: string) => {
   // One-character non-numeric replacements are too ambiguous for a safe
   // document-wide exact substitution; ask the user to keep those as a manual
   // regeneration instead.
-  if (!oldText || !newText || oldText.length > 48 || newText.length > 48 || (!isNumericChange && (oldText.length < 2 || newText.length < 2))) return null;
+  if (!oldText || !newText || oldText.length > 48 || newText.length > 48 || (!isNumericChange && (oldText.length < 2 || newText.length < 2))) {
+    return findSingleNumericReplacement(before, after);
+  }
   return { oldText, newText };
 };
 

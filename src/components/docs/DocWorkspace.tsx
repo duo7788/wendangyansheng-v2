@@ -68,16 +68,36 @@ const meaningfulSourceVersion = (content: string) => content
   .normalize('NFKC')
   .replace(/[\s\p{P}\p{S}]+/gu, '');
 
+const numericTokens = (text: string) => [...text.matchAll(/[0-9０-９][0-9０-９.,，]*(?:[\-–—][0-9０-９][0-9０-９.,，]*)?/g)].map(match => match[0]);
+
 const findSingleNumericReplacement = (before: string, after: string) => {
   // Compare complete numeric values/ranges independently from rich-text
   // structure. A contentEditable blur can normalise line breaks or wrappers,
   // but it must not prevent 0–10000 → 0–20000 from being recognised.
-  const numberTokens = (text: string) => [...text.matchAll(/[0-9０-９][0-9０-９.,，]*(?:[\-–—][0-9０-９][0-9０-９.,，]*)?/g)].map(match => match[0]);
-  const beforeTokens = numberTokens(before);
-  const afterTokens = numberTokens(after);
+  const beforeTokens = numericTokens(before);
+  const afterTokens = numericTokens(after);
   if (beforeTokens.length !== afterTokens.length) return null;
   const changed = beforeTokens.flatMap((token, index) => token === afterTokens[index] ? [] : [{ oldText: token, newText: afterTokens[index] }]);
   return changed.length === 1 ? changed[0] : null;
+};
+
+const findReplacementFromStaleCitations = (derivations: GeneratedDerivation[], currentSource: string) => {
+  const currentNumbers = [...new Set(numericTokens(currentSource))];
+  const candidates = new Map<string, { oldText: string; newText: string }>();
+  derivations.forEach(derivation => {
+    [...derivation.content.matchAll(/\[\[cite:([^\]]+)\]\]/g)].forEach(match => {
+      const rawCitation = match[1];
+      const separator = rawCitation.indexOf('|');
+      const quote = (separator >= 0 ? rawCitation.slice(separator + 1) : rawCitation).trim();
+      numericTokens(quote).forEach(oldText => currentNumbers.forEach(newText => {
+        if (oldText === newText) return;
+        if (currentSource.includes(replaceExactText(quote, oldText, newText))) {
+          candidates.set(`${oldText}\u0000${newText}`, { oldText, newText });
+        }
+      }));
+    });
+  });
+  return candidates.size === 1 ? [...candidates.values()][0] : null;
 };
 
 // This deliberately covers the lightweight editing case in the prototype:
@@ -439,8 +459,8 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const citationScrollSettleTimer = useRef<number | null>(null);
   const citationScrollListener = useRef<((event: Event) => void) | null>(null);
   const originalDocumentRef = useRef<HTMLDivElement>(null);
-  const initialSourceHashRef = useRef<string | null>(null);
   const initialSourceTextRef = useRef('');
+  const sourceEditBaselineRef = useRef('');
   const [mentionMenu, setMentionMenu] = useState<MentionMenu | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const commentSelectionStartedRef = useRef(false);
@@ -592,17 +612,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     return () => { cancelled = true; };
   }, [sourceVersionText]);
 
-  // This only resets when switching documents. It lets legacy generations
-  // without a stored hash still be marked after an edit made in this session.
+  // Reset the editing baseline when switching documents. During an edit the
+  // focus handler below replaces it with the text the user actually saw.
   useEffect(() => {
-    let cancelled = false;
-    void hashSourceText(sourceVersionText).then(hash => {
-      if (!cancelled) {
-        initialSourceHashRef.current = hash;
-        initialSourceTextRef.current = sourceTextForAi;
-      }
-    });
-    return () => { cancelled = true; };
+    initialSourceTextRef.current = sourceTextForAi;
   }, [doc.id]);
 
   useEffect(() => {
@@ -1109,20 +1122,21 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   };
 
   const selectedDocs = allDocs.filter(d => selectedDocIds.has(d.id));
-  const sourceWasEditedThisSession = Boolean(sourceContentHash && initialSourceHashRef.current && sourceContentHash !== initialSourceHashRef.current);
-  const updateCandidateRoleIds = sourceWasEditedThisSession && sourceContentHash
+  const updateCandidateRoleIds = sourceContentHash
     ? (Object.entries(generatedDerivations) as Array<[string, GeneratedDerivation]>)
       .filter(([, derivation]) => derivation.sourceContentHash !== sourceContentHash)
       .map(([roleId]) => roleId)
     : [];
   const isDerivationOutdated = (roleId: string) => {
     const derivation = generatedDerivations[roleId];
-    return Boolean(sourceWasEditedThisSession && sourceContentHash && derivation?.sourceContentHash !== sourceContentHash);
+    return Boolean(sourceContentHash && derivation?.sourceContentHash !== sourceContentHash);
   };
 
   const syncSmallSourceUpdate = async () => {
     if (updateCandidateRoleIds.length === 0) return;
-    const replacement = getSimpleSourceReplacement(initialSourceTextRef.current, sourceTextForAi);
+    const staleDerivations = updateCandidateRoleIds.map(roleId => generatedDerivations[roleId]).filter((derivation): derivation is GeneratedDerivation => Boolean(derivation));
+    const replacement = findReplacementFromStaleCitations(staleDerivations, sourceTextForAi)
+      || getSimpleSourceReplacement(initialSourceTextRef.current, sourceTextForAi);
     if (!replacement) {
       setUpdatePreparationError('目前仅支持同步一次短文字或数值替换，例如 0–1000 改为 0–2000。');
       return;
@@ -1161,7 +1175,6 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
       const matchedCount = synced.filter(Boolean).length;
       showToast(matchedCount ? `已同步 ${matchedCount} 个衍生文档中的修改点` : '已确认修改；现有衍生文档没有出现该文字或数值');
       initialSourceTextRef.current = sourceTextForAi;
-      initialSourceHashRef.current = sourceContentHash;
     } catch (error) {
       setUpdatePreparationError(error instanceof Error ? error.message : '更新衍生文档失败');
     } finally {
@@ -1668,7 +1681,15 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                 dangerouslySetInnerHTML={{ __html: doc.content }} 
                 contentEditable 
                 suppressContentEditableWarning 
-                onBlur={event => onUpdateDoc?.(doc.id, { content: event.currentTarget.innerHTML })}
+                onFocus={event => { sourceEditBaselineRef.current = toAiText(event.currentTarget.innerHTML); }}
+                onBlur={event => {
+                  // Capture the actual text immediately before this editing
+                  // session. This is more reliable than a mount-time snapshot
+                  // when a rich-text editor normalises its DOM on blur.
+                  if (sourceEditBaselineRef.current) initialSourceTextRef.current = sourceEditBaselineRef.current;
+                  sourceEditBaselineRef.current = '';
+                  onUpdateDoc?.(doc.id, { content: event.currentTarget.innerHTML });
+                }}
               />
             ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed font-normal">

@@ -165,7 +165,9 @@ export default async function handler(req, res) {
         method: 'POST',
         headers: { Authorization: `Bearer ${required(process.env.KIMI_API_KEY, 'KIMI_API_KEY')}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: process.env.KIMI_MODEL || 'kimi-k2.5', temperature: 0,
+          // This model family only accepts temperature 1 for non-streaming
+          // calls. The prompt still constrains the response to one JSON patch.
+          model: process.env.KIMI_MODEL || 'kimi-k2.5', temperature: 1,
           messages: [{ role: 'system', content: '你是严谨的文本差异助手。' }, { role: 'user', content: `只比较当前原文与旧衍生文档，找出唯一一处已经过时的短文字或数值。只返回 JSON：{"old_text":"旧衍生文档中逐字存在的文本","new_text":"应替换的新文本"}。若无法唯一确定，返回 {"old_text":"","new_text":""}。不得输出其他内容。\n\n当前原文：\n${sourceDocument.content}\n\n旧衍生文档：\n${existingContent}` }],
         }),
       });

@@ -137,7 +137,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: '只支持 POST 请求' });
 
   try {
-    const { sourceDocument, role, relatedDocuments = [], sourceImages = [], understanding = null, existingContent = null, partialContent = null, resolveSmallPatch = false } = req.body || {};
+    const { sourceDocument, role, relatedDocuments = [], sourceImages = [], understanding = null, existingContent = null, partialContent = null } = req.body || {};
     if (!sourceDocument?.id || !sourceDocument?.title || !sourceDocument?.content || !role?.id || !role?.name) {
       return json(res, 400, { error: '缺少原始文档或目标角色信息' });
     }
@@ -158,25 +158,6 @@ export default async function handler(req, res) {
         source_content_hash: createHash('sha256').update(meaningfulSourceVersion(sourceDocument.content)).digest('hex'),
       });
       return json(res, 200, { derivation: saved });
-    }
-
-    if (resolveSmallPatch && typeof existingContent === 'string') {
-      const patchResponse = await fetch(process.env.KIMI_API_URL || KIMI_API_URL, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${required(process.env.KIMI_API_KEY, 'KIMI_API_KEY')}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          // This model family only accepts temperature 1 for non-streaming
-          // calls. The prompt still constrains the response to one JSON patch.
-          model: process.env.KIMI_MODEL || 'kimi-k2.5', temperature: 1,
-          messages: [{ role: 'system', content: '你是严谨的文本差异助手。' }, { role: 'user', content: `只比较当前原文与旧衍生文档，找出唯一一处已经过时的短文字或数值。只返回 JSON：{"old_text":"旧衍生文档中逐字存在的文本","new_text":"应替换的新文本"}。若无法唯一确定，返回 {"old_text":"","new_text":""}。不得输出其他内容。\n\n当前原文：\n${sourceDocument.content}\n\n旧衍生文档：\n${existingContent}` }],
-        }),
-      });
-      if (!patchResponse.ok) throw new Error(`AI 修改点识别失败：${await patchResponse.text()}`);
-      const patchContent = (await patchResponse.json()).choices?.[0]?.message?.content || '';
-      const patchMatch = patchContent.match(/\{[\s\S]*\}/);
-      const patch = patchMatch ? JSON.parse(patchMatch[0]) : {};
-      if (typeof patch.old_text !== 'string' || typeof patch.new_text !== 'string' || !patch.old_text || !patch.new_text || patch.old_text === patch.new_text || !existingContent.includes(patch.old_text) || patch.old_text.length > 80 || patch.new_text.length > 80) throw new Error('未能唯一识别修改点，请重新编辑该数值后再同步');
-      return json(res, 200, { patch: { old_text: patch.old_text, new_text: patch.new_text } });
     }
 
     const citationSources = sourceDocumentsForCitation(sourceDocument, relatedDocuments);

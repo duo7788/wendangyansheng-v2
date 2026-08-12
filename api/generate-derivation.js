@@ -137,9 +137,27 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: '只支持 POST 请求' });
 
   try {
-    const { sourceDocument, role, relatedDocuments = [], sourceImages = [], understanding = null, existingContent = null } = req.body || {};
+    const { sourceDocument, role, relatedDocuments = [], sourceImages = [], understanding = null, existingContent = null, partialContent = null } = req.body || {};
     if (!sourceDocument?.id || !sourceDocument?.title || !sourceDocument?.content || !role?.id || !role?.name) {
       return json(res, 400, { error: '缺少原始文档或目标角色信息' });
+    }
+
+    // Small source edits (such as 0–1000 → 0–2000) are synchronised by the
+    // client as an exact, local replacement. Persist that already-scoped
+    // patch directly so this path never spends time regenerating a whole role
+    // document or changes any of its unaffected wording.
+    if (typeof partialContent === 'string') {
+      const saved = await saveDerivation({
+        source_document_id: sourceDocument.id,
+        source_document_title: sourceDocument.title,
+        role_id: role.id,
+        role_name: role.name,
+        related_document_ids: relatedDocuments.map((doc) => doc.id),
+        content: partialContent,
+        model: process.env.KIMI_MODEL || 'kimi-k2.5',
+        source_content_hash: createHash('sha256').update(meaningfulSourceVersion(sourceDocument.content)).digest('hex'),
+      });
+      return json(res, 200, { derivation: saved });
     }
 
     const citationSources = sourceDocumentsForCitation(sourceDocument, relatedDocuments);

@@ -68,6 +68,55 @@ const meaningfulSourceVersion = (content: string) => content
   .normalize('NFKC')
   .replace(/[\s\p{P}\p{S}]+/gu, '');
 
+// This deliberately covers the lightweight editing case in the prototype:
+// one short value or wording replacement (for example, 0–1000 → 0–2000).
+// It is not used for structural or multi-location document rewrites.
+const getSimpleSourceReplacement = (before: string, after: string) => {
+  if (before === after) return null;
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start += 1;
+  let beforeStart = start;
+  let afterStart = start;
+  let beforeEnd = before.length;
+  let afterEnd = after.length;
+  while (beforeEnd > start && afterEnd > start && before[beforeEnd - 1] === after[afterEnd - 1]) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
+  // A character-level diff within 0–1000 → 0–2000 is only “1 → 2”. Extend
+  // that diff to the complete numeric token so unrelated 1s are never touched.
+  const numericTokenCharacter = (value: string | undefined) => Boolean(value && /[0-9０-９.,，\-–—]/.test(value));
+  const isNumericChange = numericTokenCharacter(before[beforeStart]) || numericTokenCharacter(after[afterStart]) || numericTokenCharacter(before[beforeStart - 1]) || numericTokenCharacter(after[afterStart - 1]);
+  if (isNumericChange) {
+    while (beforeStart > 0 && numericTokenCharacter(before[beforeStart - 1])) beforeStart -= 1;
+    while (afterStart > 0 && numericTokenCharacter(after[afterStart - 1])) afterStart -= 1;
+    while (beforeEnd < before.length && numericTokenCharacter(before[beforeEnd])) beforeEnd += 1;
+    while (afterEnd < after.length && numericTokenCharacter(after[afterEnd])) afterEnd += 1;
+  }
+  const oldText = before.slice(beforeStart, beforeEnd).trim();
+  const newText = after.slice(afterStart, afterEnd).trim();
+  // One-character non-numeric replacements are too ambiguous for a safe
+  // document-wide exact substitution; ask the user to keep those as a manual
+  // regeneration instead.
+  if (!oldText || !newText || oldText.length > 48 || newText.length > 48 || (!isNumericChange && (oldText.length < 2 || newText.length < 2))) return null;
+  return { oldText, newText };
+};
+
+const replaceExactText = (content: string, oldText: string, newText: string) => content.split(oldText).join(newText);
+
+const markUpdatedPhrases = (content: string, phrases: string[]) => {
+  const uniquePhrases = [...new Set(phrases.filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (!uniquePhrases.length) return content;
+  // Never alter citation, history, or image marker syntax while decorating the
+  // visible Markdown. Those tokens are parsed separately below.
+  return content.split(/(\[\[cite:[\s\S]*?\]\]|\[\[history:[^\]]+\]\]|\[\[image:[^\]]+\]\])/g)
+    .map(part => {
+      if (/^\[\[(?:cite|history|image):/.test(part)) return part;
+      return uniquePhrases.reduce((marked, phrase) => marked.split(phrase).join(`[[updated:${phrase}]]`), part);
+    })
+    .join('');
+};
+
 type InlineCitation = { id: number; quote: string; sourceDocumentId?: string };
 
 // Generated citations occasionally differ only in line breaks, non-breaking
@@ -114,10 +163,11 @@ const DerivationImage = ({ image }: { image: SourceImage; key?: string }) => <fi
 </figure>;
 
 const renderInlineMarkdown = (text: string, keyPrefix: string, onCitationClick?: (citation: InlineCitation) => void, activeCitationId?: number, onRevealOriginal?: () => void, sourceText = '', citationSourceTexts: Record<string, string> = {}, citationNumbers: Record<string, number> = {}): ReactNode[] => {
-  const tokens = text.split(/(\[\[cite:[\s\S]*?\]\]|\[\[history:[^\]]+\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+  const tokens = text.split(/(\[\[cite:[\s\S]*?\]\]|\[\[history:[^\]]+\]\]|\[\[updated:[\s\S]*?\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
   return tokens.map((token, index) => {
     const key = `${keyPrefix}-${index}`;
     if (token.startsWith('[[history:') && token.endsWith(']]')) return <HistoryLogicTag key={key} source={token.slice(10, -2).trim()} />;
+    if (token.startsWith('[[updated:') && token.endsWith(']]')) return <mark key={key} className="rounded bg-violet-100 px-1 py-0.5 font-semibold text-violet-800 ring-1 ring-violet-200">{token.slice(10, -2)}</mark>;
     if (token.startsWith('[[cite:') && token.endsWith(']]')) {
       const rawCitation = token.slice(7, -2).trim();
       const separator = rawCitation.indexOf('|');
@@ -205,13 +255,14 @@ const derivationTitle = (content: string, fallback: string) => {
   return match?.[1].trim() || fallback;
 };
 
-const RenderedDerivation = ({ content, hideLeadingTitle = false, sourceText, citationSourceTexts, citationNumbers, sourceImages = [], activeCitation, onCitationClick, onRevealOriginal }: { content: string; hideLeadingTitle?: boolean; sourceText: string; citationSourceTexts?: Record<string, string>; citationNumbers?: Record<string, number>; sourceImages?: SourceImage[]; activeCitation: InlineCitation | null; onCitationClick: (citation: InlineCitation) => void; onRevealOriginal: () => void }) => {
-  const lines = content.replace(/\r\n/g, '\n').split('\n');
+const RenderedDerivation = ({ content, updatedPhrases = [], hideLeadingTitle = false, sourceText, citationSourceTexts, citationNumbers, sourceImages = [], activeCitation, onCitationClick, onRevealOriginal }: { content: string; updatedPhrases?: string[]; hideLeadingTitle?: boolean; sourceText: string; citationSourceTexts?: Record<string, string>; citationNumbers?: Record<string, number>; sourceImages?: SourceImage[]; activeCitation: InlineCitation | null; onCitationClick: (citation: InlineCitation) => void; onRevealOriginal: () => void }) => {
+  const decoratedContent = markUpdatedPhrases(content, updatedPhrases);
+  const lines = decoratedContent.replace(/\r\n/g, '\n').split('\n');
   // Old saved generations may still include the former appendix. Hide it so
   // they do not contradict the new inline-citation experience.
   const legacyEvidenceIndex = lines.findIndex(line => /^#{1,3}\s*原文依据\s*$/.test(line.trim()));
   const visibleLines = (legacyEvidenceIndex === -1 ? lines : lines.slice(0, legacyEvidenceIndex));
-  const historySources = [...content.matchAll(/\[\[history:([^\]]+)\]\]/g)].map(match => match[1].trim());
+  const historySources = [...decoratedContent.matchAll(/\[\[history:([^\]]+)\]\]/g)].map(match => match[1].trim());
   const contentWithoutHistoryMarkers = visibleLines.map(line => line.replace(/\s*\[\[history:[^\]]+\]\]/g, ''));
   if (hideLeadingTitle && /^#\s+/.test(contentWithoutHistoryMarkers[0]?.trim() || '')) contentWithoutHistoryMarkers.splice(0, 1);
   return <article className="space-y-3 text-sm leading-7 text-zinc-700">{renderMarkdownLines(contentWithoutHistoryMarkers, 'line', onCitationClick, activeCitation?.id, onRevealOriginal, sourceText, citationSourceTexts, citationNumbers, historySources, sourceImages)}</article>;
@@ -373,6 +424,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   const citationScrollListener = useRef<((event: Event) => void) | null>(null);
   const originalDocumentRef = useRef<HTMLDivElement>(null);
   const initialSourceHashRef = useRef<string | null>(null);
+  const initialSourceTextRef = useRef('');
   const [mentionMenu, setMentionMenu] = useState<MentionMenu | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const commentSelectionStartedRef = useRef(false);
@@ -529,7 +581,10 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
   useEffect(() => {
     let cancelled = false;
     void hashSourceText(sourceVersionText).then(hash => {
-      if (!cancelled) initialSourceHashRef.current = hash;
+      if (!cancelled) {
+        initialSourceHashRef.current = hash;
+        initialSourceTextRef.current = sourceTextForAi;
+      }
     });
     return () => { cancelled = true; };
   }, [doc.id]);
@@ -1049,15 +1104,48 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
     return Boolean(sourceWasEditedThisSession && sourceContentHash && derivation?.sourceContentHash !== sourceContentHash);
   };
 
-  const refreshAllDerivations = async () => {
+  const syncSmallSourceUpdate = async () => {
     if (updateCandidateRoleIds.length === 0) return;
+    const replacement = getSimpleSourceReplacement(initialSourceTextRef.current, sourceTextForAi);
+    if (!replacement) {
+      setUpdatePreparationError('目前仅支持同步一次短文字或数值替换，例如 0–1000 改为 0–2000。');
+      return;
+    }
     setIsPreparingUpdates(true);
     setUpdatePreparationError('');
     try {
-      await Promise.all(updateCandidateRoleIds.map(roleId => {
+      const synced = await Promise.all(updateCandidateRoleIds.map(async roleId => {
         const derivation = generatedDerivations[roleId];
-        return generateForRole(roleId, derivation?.relatedDocumentIds || [], Boolean(derivation?.visualOverview));
+        const role = roles.find(item => item.id === roleId);
+        if (!derivation || !role) return false;
+        const content = replaceExactText(derivation.content, replacement.oldText, replacement.newText);
+        const response = await fetch('/api/generate-derivation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceDocument: { id: doc.id, title: doc.title, content: sourceTextForAi },
+            role: { id: role.id, name: role.name },
+            relatedDocuments: allDocs.filter(item => derivation.relatedDocumentIds.includes(item.id)).map(item => ({ id: item.id, title: item.title, content: toAiText(item.content || '') })),
+            partialContent: content,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.derivation) throw new Error(data.error || '同步修改点失败');
+        const nextDerivation: GeneratedDerivation = {
+          ...derivation,
+          content: data.derivation.content,
+          sourceContentHash: data.derivation.source_content_hash || sourceContentHash,
+          generatedAt: data.derivation.updated_at || derivation.generatedAt,
+          updatedPhrases: content === derivation.content ? [] : [replacement.newText],
+        };
+        setGeneratedDerivations(previous => ({ ...previous, [roleId]: nextDerivation }));
+        onStoreGeneratedDerivation(doc.id, roleId, nextDerivation);
+        return content !== derivation.content;
       }));
+      const matchedCount = synced.filter(Boolean).length;
+      showToast(matchedCount ? `已同步 ${matchedCount} 个衍生文档中的修改点` : '已确认修改；现有衍生文档没有出现该文字或数值');
+      initialSourceTextRef.current = sourceTextForAi;
+      initialSourceHashRef.current = sourceContentHash;
     } catch (error) {
       setUpdatePreparationError(error instanceof Error ? error.message : '更新衍生文档失败');
     } finally {
@@ -1533,11 +1621,11 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
               </div>
             </div>}
             {canManageDerivations && updateCandidateRoleIds.length > 0 && (
-              <div className="mb-7 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-                <p className="text-sm font-semibold text-amber-950">原文已修改</p>
-                <p className="mt-1 text-xs leading-relaxed text-amber-800">检测到正文内容变化，更新会重新生成此文档的全部 {updateCandidateRoleIds.length} 个衍生文档。</p>
+              <div className="mb-7 rounded-2xl border border-violet-200 bg-violet-50/70 p-4">
+                <p className="text-sm font-semibold text-violet-950">原文有小范围修改</p>
+                <p className="mt-1 text-xs leading-relaxed text-violet-800">可直接同步短文字或数值替换到已有衍生文档，不重新生成整篇内容；同步后的修改点会以紫色标出。</p>
                 {updatePreparationError && <p className="mt-2 text-xs text-rose-700">{updatePreparationError}</p>}
-                <button onClick={() => void refreshAllDerivations()} disabled={isPreparingUpdates} className="mt-3 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60">{isPreparingUpdates ? '正在更新…' : `更新全部 ${updateCandidateRoleIds.length} 个衍生文档`}</button>
+                <button onClick={() => void syncSmallSourceUpdate()} disabled={isPreparingUpdates} className="mt-3 rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-wait disabled:opacity-60">{isPreparingUpdates ? '正在同步…' : `同步修改点到 ${updateCandidateRoleIds.length} 个衍生文档`}</button>
               </div>
             )}
             {activeSourceDocument.id !== doc.id ? <>
@@ -1679,7 +1767,7 @@ export function DocWorkspace({ doc, libraryName, onUpdateDoc, libraries, chats, 
                     <button role="tab" aria-selected={derivativePackageTab === 'overview'} onClick={() => setDerivativePackageTab('overview')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'overview' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'overview' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">项目速览</span></button>
                     <button role="tab" aria-selected={derivativePackageTab === 'document'} onClick={() => setDerivativePackageTab('document')} className={`relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${derivativePackageTab === 'document' ? 'text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>{derivativePackageTab === 'document' && <motion.span layoutId="derivative-package-active-tab" className="absolute inset-0 rounded-lg bg-white shadow-sm" transition={{ duration: 0.2, ease: 'easeOut' }} />}<span className="relative">角色文档</span></button>
                   </div>}
-                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverviewData ? <MindMapOverview overview={generatedDerivations[viewingDerivativeRole].visualOverviewData} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} hideLeadingTitle={Boolean(viewingDerivation?.relatedDocumentIds.length)} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} sourceImages={sourceImages} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
+                  {derivativePackageTab === 'overview' && generatedDerivations[viewingDerivativeRole].visualOverviewData ? <MindMapOverview overview={generatedDerivations[viewingDerivativeRole].visualOverviewData} roleName={roles.find(role => role.id === viewingDerivativeRole)?.name || '当前角色'} /> : <RenderedDerivation content={generatedDerivations[viewingDerivativeRole].content} updatedPhrases={generatedDerivations[viewingDerivativeRole].updatedPhrases} hideLeadingTitle={Boolean(viewingDerivation?.relatedDocumentIds.length)} sourceText={toAiText(doc.content || getSourceDocumentContent())} citationSourceTexts={Object.fromEntries(sourceDocuments.map(source => [source.id, toAiText(source.content || (source.id === doc.id ? getSourceDocumentContent() : ''))]))} citationNumbers={Object.fromEntries(sourceDocuments.map((source, index) => [source.id, index + 1]))} sourceImages={sourceImages} activeCitation={inlineCitationPreview} onCitationClick={openInlineCitation} onRevealOriginal={revealInlineOriginal} />}
                 </>
               ) : (
               <div className="space-y-6 text-sm text-zinc-700 leading-relaxed">

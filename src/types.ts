@@ -99,6 +99,9 @@ export interface GeneratedDerivation {
   relatedDocumentIds: string[];
   generatedAt: string;
   sourceContentHash?: string | null;
+  /** Short source replacements synchronised in the current editing session.
+   * They are presentation-only: the saved Markdown remains clean. */
+  updatedPhrases?: string[];
   visualOverview?: boolean;
   visualOverviewData?: VisualOverview | null;
 }
